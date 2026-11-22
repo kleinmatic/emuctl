@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 
-from . import full_version, guard, service, supervisor, usage
+from . import actions, full_version, service, supervisor, usage
 from .config import ConfigError, load_config
 from .settings import SettingsError, load_settings
 from .state import effective_state, read_state
@@ -112,22 +112,21 @@ def wait_for_boot(settings, name, timeout):
 
 def cmd_start(settings, args):
     cfg = need_guest(settings, args.guest)
-    state = effective_state(read_state(settings.run_dir, args.guest))
-    if state not in ("down", "crashed"):
-        print(f"{args.guest}: already {state}")
-        return 0
-    # The supervisor runs these checks again, under its locks. Running them here
-    # first means a refusal is reported to whoever typed the command, rather than
+    # The supervisor runs the guard again, under its locks. Checking here first
+    # means a refusal is reported to whoever typed the command, rather than
     # only to the service manager's log after it has accepted the start.
-    try:
-        guard.check(cfg, settings)
-    except guard.GuardError as exc:
-        sys.stderr.write(f"emuctl: REFUSING to start {args.guest}: {exc}\n")
-        return 2
-    rc = run(service.start_argv(settings, args.guest))
-    if rc != 0:
-        sys.stderr.write(f"emuctl: start failed; see: emuctl log {args.guest}\n")
-        return rc
+    plan = actions.plan_start(settings, args.guest, cfg)
+    if not plan.allowed:
+        if plan.code:
+            sys.stderr.write(f"emuctl: {plan.message}\n")
+        else:
+            print(plan.message)
+        return plan.code
+    for argv in plan.steps:
+        rc = run(argv)
+        if rc != 0:
+            sys.stderr.write(f"emuctl: start failed; see: emuctl log {args.guest}\n")
+            return rc
     if not args.wait:
         # A supervisor that refuses or fails does so within a second or two.
         time.sleep(3)
@@ -143,17 +142,22 @@ def cmd_start(settings, args):
 
 def cmd_stop(settings, args):
     cfg = need_guest(settings, args.guest)
-    state = effective_state(read_state(settings.run_dir, args.guest))
-    clean = cfg.stop_mode == "freeze" or (
-        state == "ready" and bool(cfg.stop_stages or cfg.stop_command))
-    if state in ("ready", "degraded", "booting", "stuck") and not clean:
-        sys.stderr.write(
-            f"emuctl: {args.guest} is {state} and this stop does not shut the guest OS down "
-            f"first; for the guest it is a power cut.\n")
-        if not args.force:
-            sys.stderr.write("        Shut it down from inside, or repeat with --force.\n")
-            return 1
-    return run(service.stop_argv(settings, args.guest))
+    mode = "now" if args.now else "force" if args.force else "clean"
+    plan = actions.plan_stop(settings, args.guest, mode, cfg)
+    if plan.message:
+        sys.stderr.write(f"emuctl: {plan.message}\n")
+    if not plan.allowed:
+        sys.stderr.write("        Shut it down from inside, or repeat with --force.\n")
+        return plan.code
+    rc = 0
+    for i, argv in enumerate(plan.steps):
+        rc = run(argv)
+        if rc != 0 and i < len(plan.steps) - 1:
+            # The signal for --now failed; the stop below still stops the guest,
+            # it just shuts the guest down first if the conf says how.
+            sys.stderr.write("emuctl: could not tell the supervisor to skip the shutdown; "
+                             "stopping normally\n")
+    return rc
 
 
 def cmd_log(settings, args):
@@ -335,6 +339,9 @@ def build_parser():
     s.add_argument("guest")
     s.add_argument("--force", action="store_true",
                    help="stop even though the guest OS will not be shut down first")
+    s.add_argument("--now", action="store_true",
+                   help="skip the guest's shutdown, or end one under way, and stop the "
+                        "emulator now: a power cut for the guest")
     s.set_defaults(func=cmd_stop)
 
     s = sub.add_parser("console", help="attach to a guest's console (Ctrl-] detaches)")

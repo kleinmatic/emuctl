@@ -159,6 +159,11 @@ class Supervisor:
         """Signal handler. A second request skips the in-guest shutdown."""
         self.stop_requests += 1
 
+    def request_stop_now(self, signum=None, frame=None):
+        """SIGUSR2 handler (`emuctl stop --now`): stop, skipping the in-guest
+        shutdown or ending one under way. Counts as a second request."""
+        self.stop_requests = max(self.stop_requests + 1, 2)
+
     # --- broker ----------------------------------------------------------
     def broadcast(self, data):
         """Send to every broker client without holding the lock across the
@@ -399,7 +404,9 @@ class Supervisor:
         self.set_state("stopping")
         deadline = time.time() + cfg.stop_timeout
 
-        if was == "ready" and cfg.stop_command:
+        if self.stop_requests > 1 and was in ("ready", "booting", "stuck"):
+            log("stop now requested: skipping the in-guest shutdown")
+        elif was == "ready" and cfg.stop_command:
             self.run_stop_command(deadline)
         elif was == "ready" and cfg.stop_stages:
             self.run_stop_stages(deadline)
@@ -443,7 +450,8 @@ class Supervisor:
             log(f"stop_command could not start: {exc}")
             return
         if not self.pump_until(deadline, lambda: hook.poll() is not None):
-            log("stop_command did not finish in time; killing it")
+            log("stop now requested: abandoning stop_command" if self.stop_requests > 1
+                else "stop_command did not finish in time; killing it")
             hook.kill()
             hook.wait()
             return
@@ -457,7 +465,9 @@ class Supervisor:
                 log("guest reached its halted prompt")
                 self.grace()
             elif self.running():
-                log("guest did not reach its halted prompt in time")
+                log("stop now requested: not waiting for the halted prompt"
+                    if self.stop_requests > 1 else
+                    "guest did not reach its halted prompt in time")
 
     def run_stop_stages(self, deadline):
         cfg = self.cfg
@@ -472,14 +482,17 @@ class Supervisor:
         if cfg.stop_wake:
             self.send_console(b"\r")
         if not self.pump_until(deadline, lambda: self.driver.done):
-            log("stop sequence did not complete in time")
+            log("stop now requested: abandoning the stop sequence" if self.stop_requests > 1
+                else "stop sequence did not complete in time")
             return
         if cfg.halted:
             if self.pump_until(deadline, self.guest_is_down):
                 log("guest reached its halted prompt")
                 self.grace()
             elif self.running():
-                log("guest did not reach its halted prompt in time")
+                log("stop now requested: not waiting for the halted prompt"
+                    if self.stop_requests > 1 else
+                    "guest did not reach its halted prompt in time")
 
     def grace(self):
         """Wait halt_grace seconds after the halted pattern, for a guest whose
@@ -624,4 +637,5 @@ def main(cfg, settings):
     sup = Supervisor(cfg, settings)
     signal.signal(signal.SIGTERM, sup.request_stop)
     signal.signal(signal.SIGINT, sup.request_stop)
+    signal.signal(signal.SIGUSR2, sup.request_stop_now)
     return sup.run()

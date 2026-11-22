@@ -78,6 +78,31 @@ without complaint.
 This check is in the `emuctl` command only. `systemctl stop` and host shutdown
 go straight to the supervisor, which then does what the conf allows.
 
+`--force` does not skip a shutdown the conf describes. A guest with stop
+stages or a `stop_command` still gets them; `--force` only lets a stop go
+ahead when there is nothing to run first.
+
+## Stopping now: `emuctl stop --now`
+
+Use this when the shutdown will not finish: the guest has hung, a stop stage
+is waiting for a prompt that will never come, or you need the host back now.
+
+```sh
+emuctl stop vms-alpha --now
+```
+
+It tells the supervisor to skip the guest's shutdown, or to give up on one
+already running, and then stops the emulator by its `stop_mode`. For the guest
+OS this is a power cut, and emuctl says so. With `stop_mode = freeze` the
+machine is still saved, so nothing is lost.
+
+You can run it while a normal `emuctl stop` is still waiting, from another
+terminal. The supervisor log says which step it abandoned.
+
+How it works: `emuctl` sends SIGUSR2 to the supervisor (on systemd,
+`systemctl kill --kill-whom=main -s USR2`), then runs the usual stop. A second
+SIGTERM to the supervisor has the same effect.
+
 ## Timeouts in the service manager
 
 The service manager must wait longer than the supervisor does. The shipped

@@ -6,6 +6,8 @@
   `status --json` now carry CPU time, memory, tasks, disk I/O and disk image
   sizes for each guest (docs/monitoring.md). The unit file turns on systemd's
   CPU, memory, task and I/O accounting.
+- `emuctl stop --now` skips the guest's shutdown, or ends one under way, and
+  stops the emulator at once. The supervisor treats SIGUSR2 as this request.
 - Linux with systemd is the supported platform, Debian 13 the reference;
   the core keeps running on FreeBSD (docs/platforms.md).
 - `tools/devhost`: a throwaway host with four fake guests for trying emuctl

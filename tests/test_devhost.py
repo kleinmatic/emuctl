@@ -96,3 +96,15 @@ def test_down_uses_the_shells_devhost(tmp_path):
     env = devhost_env(d)
     subprocess.run([sys.executable, DEVHOST, "down"], check=True, capture_output=True, env=env)
     assert not os.path.exists(d)
+
+
+def test_stop_now_through_the_stand_in_systemctl(host):
+    d, env = host
+    emuctl(env, "start", "vax", "--wait")
+    r = emuctl(env, "stop", "vax", "--now")
+    assert "power cut" in r.stderr
+    assert json.loads(emuctl(env, "status", "vax", "--json", check=False).stdout)["state"] == "down"
+    log = emuctl(env, "log", "vax", "-n", "200").stdout
+    assert "skipping the in-guest shutdown" in log
+    assert "sent: shutdown" not in open(os.path.join(d, "work", "vax", "console.log"),
+                                        "rb").read().decode()
