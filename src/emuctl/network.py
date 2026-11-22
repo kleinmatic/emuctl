@@ -94,6 +94,10 @@ class Host:
         link = os.path.join(self.sysfs, name, "master")
         return os.path.basename(os.readlink(link)) if os.path.islink(link) else None
 
+    def address(self, name):
+        a = self._read(name, "address")
+        return a.lower() if a else None
+
     def peer(self, name):
         """The other end of a veth pair, by its ifindex, or None."""
         want = self._read(name, "iflink")
@@ -243,13 +247,16 @@ def guest_network(settings, name, host=None, cfg=None, state=None):
                     dropped=_sum(c["rx_dropped"], c["tx_dropped"]))
         if info["bridge"]:
             info["bridge_uplink"] = bool(host.uplinks(info["bridge"]))
-            macs = host.fdb_macs(info["bridge"])
+            macs = host.fdb_macs(info["bridge"]) if state != "down" else None
             port = via or ifname
-            if macs is not None and (n["mac"] or state == "ready"):
-                # Seen: its configured MAC, or anything learned on its port. A
+            # The host's own ends of the link send frames too (IPv6 router
+            # solicitations from a veth, for one); those prove nothing.
+            own = {host.address(i) for i in (ifname, via) if i}
+            if macs is not None:
+                # Seen: its configured MAC, or anything else learned on its port. A
                 # DECnet Phase IV guest changes its MAC to AA-00-04-... when it starts.
-                info["mac_seen"] = any(m == (n["mac"] or "").lower() or p == port
-                                       for m, p in macs)
+                info["mac_seen"] = any(m == (n["mac"] or "").lower()
+                                       or (p == port and m not in own) for m, p in macs)
                 if state == "ready" and not info["mac_seen"]:
                     warnings.append(f"{name}: ready, but nothing from it has been seen on "
                                     f"{info['bridge']} recently (expected MAC {n['mac']})")

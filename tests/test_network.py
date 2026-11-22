@@ -27,6 +27,7 @@ class FakeNet:
         (d / "ifindex").write_text(f"{self.index}\n")
         (d / "iflink").write_text(f"{iflink or self.index}\n")
         (d / "operstate").write_text("up\n" if up else "down\n")
+        (d / "address").write_text(f"02:ff:00:00:00:{self.index:02x}\n")
         (d / "carrier").write_text("1\n" if up else "0\n")
         if kind == "tap":
             (d / "tun_flags").write_text("0x1002\n")
@@ -136,11 +137,19 @@ def test_guest_through_a_veth_peer(lab, settings):
     assert "not in any bridge" not in text
 
 
-def test_mac_not_checked_unless_ready(lab, settings):
+def test_mac_not_checked_while_down(lab, settings):
     host, _ = lab
     rep = network.guest_network(settings, "mips", host)        # down
     assert not any("has been seen" in w for w in rep["warnings"])
-    assert rep["nics"][0]["mac_seen"] is False
+    assert rep["nics"][0]["mac_seen"] is None
+
+
+def test_the_hosts_own_frames_do_not_count(lab, settings):
+    host, _ = lab
+    write_state(settings.run_dir, "mips", state="ready", pid=os.getpid(),
+                supervisor_pid=os.getpid(), cmd="", started_at=0)
+    host._fdb["br0"] = {(host.address("vea1"), "vea0")}     # the host talking from vea1
+    assert network.guest_network(settings, "mips", host)["nics"][0]["mac_seen"] is False
 
 
 def test_missing_interface_and_host_only(lab, settings):
@@ -150,7 +159,7 @@ def test_missing_interface_and_host_only(lab, settings):
                                  "creates it when it starts)"]
     aix = network.guest_network(settings, "aix", host)
     assert aix["nics"][0]["bridge"] == "br1" and aix["nics"][0]["bridge_uplink"] is False
-    assert aix["nics"][0]["mac_seen"] is False         # br1's table is empty: not seen
+    assert aix["nics"][0]["mac_seen"] is None          # down: not checked
 
 
 def test_not_in_a_bridge(lab, settings, tmp_path):
@@ -237,7 +246,12 @@ def test_format_guest(lab, settings):
     host, _ = lab
     text = network.format_guest(network.guest_network(settings, "mips", host))
     assert "vea1: veth" in text and "through its peer vea0" in text
-    assert "NOT seen on the bridge" in text
+    assert "not checked" in text                        # down
+    write_state(settings.run_dir, "mips", state="ready", pid=os.getpid(),
+                supervisor_pid=os.getpid(), cmd="", started_at=0)
+    host._fdb.clear()
+    assert "NOT seen on the bridge" in network.format_guest(
+        network.guest_network(settings, "mips", host))
     assert "does not exist" in network.format_guest(network.guest_network(settings, "ghost",
                                                                            host))
     assert "no host interfaces known" in network.format_guest(
