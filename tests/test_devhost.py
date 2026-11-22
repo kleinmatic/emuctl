@@ -4,6 +4,7 @@ import json
 import os
 import re
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -108,3 +109,11 @@ def test_stop_now_through_the_stand_in_systemctl(host):
     assert "skipping the in-guest shutdown" in log
     assert "sent: shutdown" not in open(os.path.join(d, "work", "vax", "console.log"),
                                         "rb").read().decode()
+
+
+def test_up_sets_up_the_web_page(host):
+    d, env = host
+    assert env["EMUCTL_WEB_CONF"] == os.path.join(d, "web.conf")
+    assert "listen = 127.0.0.1" in open(env["EMUCTL_WEB_CONF"]).read()
+    assert stat.S_IMODE(os.stat(os.path.join(d, "web-password")).st_mode) == 0o600
+    assert open(os.path.join(d, "web", "users")).read().startswith("dev:admin:scrypt$")

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- New: a web interface, `emuctl web serve` (docs/web.md). It needs Python
+  3.11 and aiohttp. It shows the host, every guest with its state, CPU,
+  memory, disk and network use over the last hour, the guest's hardware,
+  network and logs, and the host's bridges and warnings, updated live. It
+  serves HTTPS on port 8600 with a self-signed certificate made on first
+  start, has its own users (`emuctl web passwd`), and runs as its own
+  account. `sudo ./install.sh web` sets it up.
+
 - `emuctl list` shows GUEST, STATE, UPTIME and DETAIL and fits in 80 columns.
   `--node`, `--os` and `--emulator` add those columns back; `--usage` adds
   CPU% and MEM. `--json` is unchanged.

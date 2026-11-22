@@ -115,7 +115,7 @@ else
 fi
 echo "next steps (docs/web.md):"
 echo "  1. let it read guest workdirs:  usermod -aG <the guests' group> emuctl-web"
-echo "  2. add a user:                  emuctl web passwd <name>"
-echo "  3. start it:                    systemctl enable --now emuctl-web"
+echo "  2. start it:                    systemctl enable --now emuctl-web"
+echo "  3. add a user:                  emuctl web passwd <name>"
 echo "  4. open https://$(hostname):8600/ and compare the certificate's fingerprint with"
 echo "     the one in: journalctl -u emuctl-web"

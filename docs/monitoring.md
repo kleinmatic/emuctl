@@ -1,7 +1,7 @@
 # Monitoring: what the numbers mean
 
-`emuctl list --usage`, the `--json` output of `list` and `status`, and (later)
-the web page all show the same numbers. This page says where each one comes
+`emuctl list --usage`, the `--json` output of `list` and `status`, and the
+web page all show the same numbers. This page says where each one comes
 from and how far to trust it.
 
 ## Resource use
@@ -48,6 +48,19 @@ A number is shown as `-` (or `null` in JSON) when it cannot be read:
 
 Network detail per interface, and the bridges, are in `emuctl net`; see
 [networking.md](networking.md).
+
+## The web page's graphs
+
+The web daemon reads these numbers for every guest every 5 seconds and keeps
+the last hour in memory. CPU% there is worked out between two readings 5
+seconds apart, rather than the one-second sample `list --usage` takes, so the
+two can differ a little. Disk I/O and network traffic are drawn as rates per
+second. A gap in a graph means the guest was down, had just started, or
+restarted between two readings (its counters went back to zero). A restart of
+the daemon starts the graphs again.
+
+The daemon checks a ready guest's `guest_addr` at most every 30 seconds, not
+every 5: on an old OS each check starts a server process in the guest.
 
 ## Cost
 

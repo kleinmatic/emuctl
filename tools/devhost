@@ -7,6 +7,8 @@
     emuctl start vax --wait
     emuctl console vax               Ctrl-] detaches
     emuctl stop vax
+    emuctl web serve                 the web page, at the address `up` printed
+                                     (user dev, password in <dir>/web-password)
     tools/devhost down               stop every guest and delete the directory
                                      (the one this shell's exports name, else the default)
 
@@ -60,6 +62,7 @@ def free_ports(n):
 
 def env_lines(d):
     return [
+        f"export EMUCTL_WEB_CONF={d}/web.conf",
         f"export EMUCTL_CONF={d}/emuctl.conf",
         f"export EMUCTL_GUEST_DIR={d}/guests",
         f"export EMUCTL_RUN_DIR={d}/run",
@@ -102,8 +105,38 @@ def cmd_up(d):
         os.chmod(launcher, 0o755)
         for tool in ("systemctl", "journalctl"):
             os.symlink(os.path.abspath(__file__), os.path.join(d, "bin", tool))
+        web_setup(d)
     print("\n".join(env_lines(d)))
+    sys.stderr.write(web_note(d))
     return 0
+
+
+def web_setup(d):
+    """A web.conf on a free localhost port, and a user `dev` with a random password."""
+    import secrets
+    port = free_ports(1)[0]
+    state = os.path.join(d, "web")
+    os.makedirs(state, mode=0o700)
+    with open(os.path.join(d, "web.conf"), "w") as fh:
+        fh.write(f"listen = 127.0.0.1\nport = {port}\nstate_dir = {state}\n"
+                 f"task_log = {state}/tasks.log\n")
+    password = secrets.token_urlsafe(12)
+    fd = os.open(os.path.join(d, "web-password"), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(password + "\n")
+    subprocess.run([os.path.join(d, "bin", "emuctl"), "web", "passwd", "dev", "--stdin"],
+                   input=password + "\n", text=True, check=True, capture_output=True,
+                   env=dict(os.environ, EMUCTL_WEB_CONF=os.path.join(d, "web.conf")))
+
+
+def web_note(d):
+    try:
+        with open(os.path.join(d, "web.conf")) as fh:
+            port = next(ln.split("=")[1].strip() for ln in fh if ln.startswith("port"))
+    except (OSError, StopIteration):
+        return ""
+    return (f"devhost: web page: `emuctl web serve`, then https://127.0.0.1:{port}/ "
+            f"as dev, password in {d}/web-password\n")
 
 
 def supervisors(d):

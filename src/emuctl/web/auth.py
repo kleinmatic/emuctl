@@ -93,7 +93,12 @@ def write_users(path, users):
     one, or of its directory, so the daemon can still read it.
     """
     d = os.path.dirname(path) or "."
-    os.makedirs(d, exist_ok=True)
+    if not os.path.isdir(d):
+        if os.geteuid() == 0:
+            # Made by root it would be root's, and the daemon could not read it.
+            raise AuthError(f"{d} does not exist; start emuctl-web once (it makes the "
+                            f"directory), then run this again")
+        os.makedirs(d)
     ref = path if os.path.exists(path) else d
     st = os.stat(ref)
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".users.")

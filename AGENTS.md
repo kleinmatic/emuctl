@@ -12,8 +12,9 @@ shutdown commands the guest's conf lists, logs the console, re-serves it to
 any number of clients, and records the guest's state. `docs/design.md`
 explains why it works this way; read it before changing the supervisor.
 
-A web interface is being added in phases. Until it exists, ignore the parts
-of this file and the skills that mention it.
+`emuctl web serve` is a web interface on top (`src/emuctl/web/`, an aiohttp
+daemon and a page of plain JavaScript modules with no build step). It is
+being built in phases; `docs/web.md` describes what exists.
 
 ## Layout
 
@@ -27,28 +28,46 @@ of this file and the skills that mention it.
 | `src/emuctl/guard.py` | the checks that stop two emulators sharing a disk |
 | `src/emuctl/service.py` | systemctl and rc.d command lines |
 | `src/emuctl/telnet.py` | the bit of telnet the broker speaks |
-| `systemd/`, `rc.d/`, `install.sh` | service files and the installer |
+| `src/emuctl/usage.py`, `network.py`, `hardware.py`, `actions.py` | resource numbers, the network report, emulated hardware, start and stop decisions; the CLI and the web page both use them |
+| `src/emuctl/web/app.py` | the web daemon: security middleware, every route, live events |
+| `src/emuctl/web/auth.py`, `conf.py`, `tls.py` | users and sessions, `web.conf`, the certificate (standard library only) |
+| `src/emuctl/web/sampler.py`, `data.py` | the 5-second sampler and history; what the read-only routes return |
+| `src/emuctl/web/static/` | the page: `index.html`, `css/`, `js/` (ES modules), `vendor/` (third-party, from `tools/vendor.sh`) |
+| `systemd/`, `rc.d/`, `install.sh` | service files and the installer (`install.sh web` adds the web daemon) |
+| `examples/polkit/` | the rule that lets the web daemon manage guest units |
 | `tests/` | pytest; `fake_emulator.py` stands in for a real emulator |
+| `tests/js/` | `node --test` tests for the page's pure modules |
+| `tests/browser/` | Playwright tests of the page against a real daemon |
 | `tools/devhost` | a throwaway host with fake guests |
 | `tools/release_check.py`, `tools/coverage_check.py` | used by CI |
+| `tools/vendor.sh` | fetches the page's third-party files at pinned versions |
 | `docs/` | user documentation, one page per topic |
 | `.claude/skills/` | step-by-step guides for common changes (below) |
 
 ## Running things
 
-pytest, pytest-cov and ruff are the only tools needed. Install them with
-`python3 -m pip install pytest pytest-cov ruff`, or run them without
-installing through uv: `uvx --with pytest --with pytest-cov pytest ...` and
-`uvx ruff ...`.
+pytest, pytest-cov and ruff are the only tools needed for the core. The web
+tests also need Python 3.11, `aiohttp` and `pytest-aiohttp`; without them
+they skip themselves. Install everything with
+`python3 -m pip install pytest pytest-cov ruff aiohttp pytest-aiohttp`, or
+make a virtualenv: `uv venv && uv pip install -e '.[test]' ruff`.
 
 ```sh
 python3 -m pytest -q                              # all tests, no root, no emulator
 python3 -m pytest -q --cov=emuctl --cov-report=json   # writes coverage.json ...
 python3 tools/coverage_check.py                       # ... which this reads
 ruff check src tests tools tools/devhost
+node --test tests/js/*.test.mjs                   # the page's pure modules; needs only node
+EMUCTL_BROWSER=1 python3 -m pytest tests/browser  # Playwright; on its own, not with the rest
 eval "$(tools/devhost up)"                        # then: emuctl list, start, console, stop
+emuctl web serve                                  # the page for that devhost (address printed by up)
 tools/devhost down                                # the devhost this shell set up
 ```
+
+The browser tests need `pip install pytest-playwright` and
+`python -m playwright install chromium`. They cannot run in the same pytest
+session as the asyncio web tests, so `tests/conftest.py` leaves them out
+unless `EMUCTL_BROWSER` is set.
 
 The full suite takes under a minute. The end-to-end tests start real
 supervisors against `tests/fake_emulator.py`, which serves a firmware prompt,
@@ -107,8 +126,11 @@ files are read only if they are regular files of bounded size
 
 ## The web interface's security rules
 
-Once `src/emuctl/web/` exists, every change to it follows these. A console is
-a root login on many guests, so the page is as powerful as root.
+Every change to `src/emuctl/web/` follows these. A console is a root login on
+many guests, so the page is as powerful as root. Rules 1 to 8 are enforced in
+one place, `web/app.py` (its docstring maps each rule to the code); keep it
+that way rather than checking in individual handlers. `docs/web-security.md`
+explains them to users.
 
 1. The daemon listens on port 8600 on all addresses by default and serves
    HTTPS, with a self-signed certificate it makes on first start unless the
@@ -131,6 +153,11 @@ a root login on many guests, so the page is as powerful as root.
    origin.
 9. Every action is written to the task log with the user's name.
 10. Each rule has at least one test that tries to break it.
+
+In the page's JavaScript: build the page with `dom.js`'s `h()` and
+`textContent`, never `innerHTML`, since guest names, console text and log
+lines are untrusted. No inline `style=` attributes or inline scripts (the CSP
+forbids both); set a computed size through `el.style` in code.
 
 The `web-security-check` skill walks a diff against these.
 

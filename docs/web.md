@@ -1,0 +1,132 @@
+# The web interface
+
+`emuctl web serve` runs a small web server that shows every guest on the
+host: its state, CPU, memory, disk and network use over the last hour, its
+emulated hardware, the host's bridges, and the logs. It needs Linux with
+systemd (see [platforms.md](platforms.md)), Python 3.11 or newer, and
+`aiohttp`.
+
+A tour of the screens is in [web-tour.md](web-tour.md). What the page can do
+and how it is protected is in [web-security.md](web-security.md). Read that
+before putting it on a network you do not control: a console on the page is a
+root login on many guests.
+
+## Install
+
+```sh
+sudo apt install python3-aiohttp openssl
+sudo ./install.sh web
+```
+
+`install.sh web` installs emuctl as usual, then:
+
+- creates a system account, `emuctl-web`, with no login shell;
+- installs `/etc/systemd/system/emuctl-web.service`;
+- installs the polkit rule `/etc/polkit-1/rules.d/50-emuctl-web.rules`, which
+  lets that account start, stop and signal `emuctl-guest@*` units and nothing
+  else.
+
+It does not start or enable anything. Then:
+
+1. **Let the account read the guests' files.** The page reads each guest's
+   console log, emulator config and disk image sizes. Add `emuctl-web` to the
+   group that owns the guests' workdirs, the group the guest unit's `Group=`
+   names:
+
+   ```sh
+   sudo usermod -aG <the guests' group> emuctl-web
+   ```
+
+   Know what this gives it: anything in a workdir that the group can read,
+   which may include disk images. The account is also in `systemd-journal`
+   (set in the unit file), so it can read every service's log, not only the
+   guests'.
+
+2. **Start it.** `sudo systemctl enable --now emuctl-web`. Leave out
+   `enable` if it should not start at boot.
+
+3. **Add a user.** `sudo emuctl web passwd <name>` asks for a password twice
+   and stores a scrypt hash. Every user can do everything for now; roles come
+   in a later release. `sudo emuctl web passwd <name> --delete` removes one,
+   and ends that user's sessions within a request.
+
+4. **Open it** at `https://<host>:8600/`. The first time, the browser warns
+   that the certificate is not trusted, because the daemon made it itself.
+   Compare the fingerprint the browser shows with the one in the log, and
+   accept it only if they match:
+
+   ```sh
+   journalctl -u emuctl-web | grep fingerprint
+   ```
+
+## Settings: /etc/emuctl/web.conf
+
+The file is optional; these are the defaults. Restart the service after a
+change.
+
+```
+listen = 0.0.0.0        # the address to listen on; :: for IPv6 too
+port = 8600
+tls = on                # off serves plain HTTP; see below
+tls_cert =              # empty: a self-signed certificate in state_dir
+tls_key =
+state_dir = /var/lib/emuctl-web
+users_file =            # empty: state_dir/users
+task_log = /var/log/emuctl/web-tasks.log
+```
+
+### The certificate
+
+On its first start the daemon makes a self-signed certificate and key with
+the `openssl` program and keeps them in `state_dir` (`web.crt`, and `web.key`
+with mode 0600). It reuses them after that. It is valid for ten years for the
+host's name, its short name, `<short name>.local`, `localhost`, `127.0.0.1`
+and `::1`.
+
+To use your own, for example from a homelab CA, set both `tls_cert` and
+`tls_key` to files the `emuctl-web` account can read. The daemon never
+replaces a certificate you named.
+
+### Turning TLS off
+
+`tls = off` serves plain HTTP. Then passwords, the session cookie and
+everything the page shows, consoles included, cross the network in clear,
+and the daemon logs a warning saying so at every start. Only do this behind
+something that adds TLS for you, or on a network where nobody else can
+listen.
+
+## Who can reach it
+
+The daemon listens on every address on port 8600, as Proxmox does on 8006.
+Anyone who can reach that port can try to log in; after five wrong passwords
+from one address it makes that address wait, doubling the wait each time up
+to five minutes. To limit who can reach it, use a firewall, or set `listen`
+to one address.
+
+## Upgrading
+
+Run `sudo ./install.sh web` from the new version, then
+`sudo systemctl restart emuctl-web`. The installer keeps an existing unit
+file and polkit rule; compare them with the new ones in `systemd/` and
+`examples/polkit/` in case they changed. A restart logs everyone out.
+
+## What it costs
+
+The daemon looks at every guest every 5 seconds, whether or not a page is
+open: one `systemctl show` for all running guests and a few small file reads
+each. It connects to a guest's `guest_addr` at most every 30 seconds. The
+host's network report, which runs `ip`, `bridge` and `ethtool`, is made only
+while a page shows it. It keeps one hour of history in memory; a restart
+starts the graphs again.
+
+## When something is wrong
+
+- **The browser cannot connect.** `systemctl status emuctl-web` and
+  `journalctl -u emuctl-web`. A port already in use, or a certificate it
+  cannot read, stops it at start with a message saying so.
+- **Numbers show as "—".** See [monitoring.md](monitoring.md). Disk sizes
+  need the account to be able to see into the workdir (step 1 above).
+- **"No users" in the log.** Run step 3.
+- **`emuctl web passwd` says the directory does not exist.** Start the
+  service once first; systemd creates `/var/lib/emuctl-web` owned by the
+  account.

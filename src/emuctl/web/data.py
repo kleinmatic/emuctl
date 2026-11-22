@@ -42,18 +42,41 @@ def _uptime(path="/proc/uptime"):
         return None
 
 
-def _mount_point(path):
-    path = os.path.realpath(path)
-    while not os.path.ismount(path):
-        parent = os.path.dirname(path)
-        if parent == path:
-            break
-        path = parent
-    return path
+def _mounts(path="/proc/self/mountinfo"):
+    """[(mount point, source, fstype)] from mountinfo."""
+    out = []
+    try:
+        with open(path) as fh:
+            for line in fh:
+                left, _, right = line.partition(" - ")
+                f, r = left.split(), right.split()
+                if len(f) >= 5 and len(r) >= 2:
+                    point = f[4].replace("\\040", " ").replace("\\011", "\t")
+                    out.append((point, r[1], r[0]))
+    except OSError:
+        pass
+    return out
 
 
-def host_info(settings, configs, meminfo=_meminfo, uptime=_uptime):
+def _filesystem_of(path, mounts):
+    """(key, mount point) for the filesystem holding `path`. Btrfs subvolumes
+    and bind mounts of one device share a key, so their space is shown once."""
+    real = os.path.realpath(path)
+    best = None
+    for point, source, fstype in mounts:
+        if (real == point or real.startswith(point.rstrip("/") + "/")) \
+                and (best is None or len(point) > len(best[0])):
+            best = (point, source, fstype)
+    if best is None:
+        return real, real
+    point, source, fstype = best
+    shared = source.startswith("/dev/") or fstype in ("btrfs", "zfs", "xfs", "ext4")
+    return ((source, fstype) if shared else point), point
+
+
+def host_info(settings, configs, meminfo=_meminfo, uptime=_uptime, mounts=_mounts):
     mem = meminfo()
+    table = mounts()
     try:
         load = [round(x, 2) for x in os.getloadavg()]
     except OSError:
@@ -62,11 +85,11 @@ def host_info(settings, configs, meminfo=_meminfo, uptime=_uptime):
     for name, cfg in sorted(configs.items()):
         try:
             st = os.statvfs(cfg.workdir)
-            dev = os.stat(cfg.workdir).st_dev
         except OSError:
             continue
-        fs = filesystems.setdefault(dev, {
-            "mount": _mount_point(cfg.workdir), "guests": [],
+        key, point = _filesystem_of(cfg.workdir, table)
+        fs = filesystems.setdefault(key, {
+            "mount": point, "guests": [],
             "total_bytes": st.f_blocks * st.f_frsize, "free_bytes": st.f_bavail * st.f_frsize})
         fs["guests"].append(name)
     return {

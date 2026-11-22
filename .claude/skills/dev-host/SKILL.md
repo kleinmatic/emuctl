@@ -53,6 +53,36 @@ only. `show` reports empty values, as a host without systemd's accounting
 would. If a change needs another verb, add it to `tools/devhost` and to
 `tests/test_devhost.py`.
 
+## The web page
+
+`up` also writes a `web.conf` on a free localhost port and a user `dev` with
+a random password in `<dir>/web-password`. It prints the address. Then:
+
+```sh
+emuctl web serve            # needs Python 3.11 and aiohttp in the Python
+                            # that ran `devhost up`; stops with Ctrl-C
+```
+
+Open the printed `https://127.0.0.1:<port>/`, accept the self-signed
+certificate, and log in as `dev`. Starting and stopping guests from the CLI
+shows on the page within 5 seconds. Without cgroups the CPU and memory
+graphs stay empty: a devhost has no systemd accounting.
+
+## The web page
+
+`up` also writes a `web.conf` on a free localhost port and a user `dev` with
+a random password in `<dir>/web-password`, and prints the address. Then:
+
+```sh
+emuctl web serve            # needs Python 3.11 and aiohttp in the Python
+                            # that ran `devhost up`; Ctrl-C stops it
+```
+
+Open the printed `https://127.0.0.1:<port>/`, accept the self-signed
+certificate, and log in as `dev`. Starting and stopping guests from the CLI
+shows on the page within 5 seconds. The CPU and memory graphs stay empty: a
+devhost has no systemd accounting.
+
 ## When finished
 
 ```sh

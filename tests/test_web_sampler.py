@@ -151,7 +151,25 @@ def test_host_info(settings, tmp_path):
                          meminfo=lambda: {"MemTotal": 8, "MemAvailable": 4}, uptime=lambda: 9)
     assert (out["mem_total_bytes"], out["uptime"], out["guests"]) == (8, 9, 1)
     assert out["filesystems"][0]["guests"] == ["g1"]
-    assert os.path.ismount(out["filesystems"][0]["mount"])
+    assert os.path.isdir(out["filesystems"][0]["mount"])
+
+
+def test_filesystems_are_grouped_by_device(tmp_path):
+    info = tmp_path / "mountinfo"
+    info.write_text(
+        "22 1 0:21 / / rw - ext4 /dev/sda1 rw\n"
+        "30 22 0:40 /@a /srv/emu/a rw - btrfs /dev/sdb rw\n"
+        "31 22 0:41 /@b /srv/emu/b rw - btrfs /dev/sdb rw\n"
+        "32 22 0:42 / /srv/my\\040disk rw - tmpfs tmpfs rw\n")
+    mounts = data._mounts(str(info))
+    assert ("/srv/my disk", "tmpfs", "tmpfs") in mounts
+    a = data._filesystem_of("/srv/emu/a/x", mounts)
+    b = data._filesystem_of("/srv/emu/b", mounts)
+    assert a[0] == b[0] == ("/dev/sdb", "btrfs") and a[1] == "/srv/emu/a"
+    assert data._filesystem_of("/srv/my disk/x", mounts) == ("/srv/my disk", "/srv/my disk")
+    assert data._filesystem_of("/home/x", mounts)[0] == ("/dev/sda1", "ext4")
+    assert data._filesystem_of("/x", []) == ("/x", "/x")
+    assert data._mounts(str(tmp_path / "none")) == []
 
 
 def test_meminfo_and_uptime(tmp_path):

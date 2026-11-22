@@ -43,6 +43,8 @@ emuctl doesn't install emulators, create disk images, or set up networking.
 ## Requirements
 
 - Python 3.10 or newer. No other packages.
+- For the web interface: Python 3.11 or newer and `aiohttp`
+  (`python3-aiohttp` on Debian).
 - Linux with systemd; Debian 13 is the reference system. The core also runs on
   FreeBSD. See [docs/platforms.md](docs/platforms.md).
 
@@ -61,6 +63,12 @@ development version.
 
 To try it without a real emulator, see [docs/quickstart.md](docs/quickstart.md).
 
+### The web interface
+
+`sudo ./install.sh web` also sets up a web page on port 8600 that shows every
+guest, its resource use over the last hour, its hardware and the host's
+bridges, in the style of Proxmox. See [docs/web.md](docs/web.md).
+
 ## Documentation
 
 - [Quickstart](docs/quickstart.md): a first guest, using a fake emulator
@@ -74,6 +82,8 @@ To try it without a real emulator, see [docs/quickstart.md](docs/quickstart.md).
 - [Design](docs/design.md): why it works this way
 - [Versions and releases](docs/releasing.md)
 - [Supported platforms](docs/platforms.md)
+- Web interface: [setting it up](docs/web.md), [security](docs/web-security.md),
+  [API](docs/api.md)
 
 ## Other tools
 
@@ -87,7 +97,8 @@ they may suit you better.
 
 Anyone who can connect to a guest's console port can type at the guest. The
 port listens only on 127.0.0.1 unless you change it. Use SSH to reach it from
-another machine.
+another machine. The web interface has logins and HTTPS; read
+[docs/web-security.md](docs/web-security.md) before exposing it.
 
 ## License
 
