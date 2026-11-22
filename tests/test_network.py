@@ -49,9 +49,10 @@ class FakeNet:
 
 def runner(fdb=None, offload=None, addrs=None):
     def run(argv, **kw):
-        if argv[0] == "bridge":
+        tool = os.path.basename(argv[0])
+        if tool == "bridge":
             out = json.dumps((fdb or {}).get(argv[-1], []))
-        elif argv[0] == "ethtool":
+        elif tool == "ethtool":
             state = (offload or {}).get(argv[-1], "off")
             out = f"Features for {argv[-1]}:\ntx-checksumming: {state}\n"
         else:
@@ -257,3 +258,11 @@ def test_cli_net_and_check(lab, settings, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["nics"][0]["via"] == "vea0"
     cli.main(["check", "ghost"])
     assert "interface tap9 does not exist" in capsys.readouterr().out
+
+
+def test_which_sbin_looks_in_sbin(monkeypatch, tmp_path):
+    monkeypatch.setenv("PATH", str(tmp_path))
+    fake = tmp_path / "bridge"
+    fake.write_text("#!/bin/sh\n")
+    fake.chmod(0o755)
+    assert network.which_sbin("bridge") == str(fake)

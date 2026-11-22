@@ -28,7 +28,8 @@ def fake_cgroup(root, path=GROUP, usec=5_000_000, mem=1048576, peak=2097152, pid
 
 
 def show_output(*pairs):
-    return "\n\n".join(f"Id={u}\nControlGroup={g}" for u, g in pairs) + "\n"
+    # The order systemd 257 really prints them in: ControlGroup before Id.
+    return "\n\n".join(f"ControlGroup={g}\nId={u}" for u, g in pairs) + "\n"
 
 
 def runner(text):
@@ -45,6 +46,13 @@ def test_control_groups_one_call_for_many():
     assert groups == {"g1": GROUP}
     assert run.argv[:4] == ["systemctl", "show", "-p", "Id,ControlGroup"]
     assert "emuctl-guest@g2.service" in run.argv
+
+
+def test_control_groups_either_property_order():
+    text = ("Id=emuctl-guest@g1.service\nControlGroup=/a\n\n"
+            "ControlGroup=/b\nId=emuctl-guest@g2.service\n")
+    assert usage.control_groups(settings(), ["g1", "g2"], run=runner(text)) == \
+        {"g1": "/a", "g2": "/b"}
 
 
 def test_control_groups_not_systemd_or_failure():

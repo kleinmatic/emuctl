@@ -32,13 +32,13 @@ def control_groups(settings, names, run=subprocess.run):
                   capture_output=True, text=True, timeout=10).stdout
     except (OSError, subprocess.SubprocessError):
         return {}
-    groups, unit = {}, None
-    for line in out.splitlines():
-        key, _, value = line.partition("=")
-        if key == "Id":
-            unit = value
-        elif key == "ControlGroup" and value and unit in units:
-            groups[units[unit]] = value
+    # One block per unit, separated by blank lines. systemctl does not keep the
+    # order the properties were asked for in (it prints ControlGroup first).
+    groups = {}
+    for block in out.split("\n\n"):
+        props = dict(line.partition("=")[::2] for line in block.splitlines() if "=" in line)
+        if props.get("ControlGroup") and props.get("Id") in units:
+            groups[units[props["Id"]]] = props["ControlGroup"]
     return groups
 
 

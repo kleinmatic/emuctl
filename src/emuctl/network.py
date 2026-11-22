@@ -23,10 +23,17 @@ COUNTERS = ("rx_bytes", "tx_bytes", "rx_packets", "tx_packets", "rx_errors", "tx
             "rx_dropped", "tx_dropped")
 
 
+def which_sbin(name):
+    """shutil.which, also looking in the sbin directories an ordinary user's
+    PATH leaves out on Debian, where `bridge` and `ethtool` live."""
+    path = os.environ.get("PATH", "") + os.pathsep + "/usr/sbin:/sbin"
+    return shutil.which(name, path=path)
+
+
 class Host:
     """Reads one host's interfaces. Caches per instance; make a new one per report."""
 
-    def __init__(self, sysfs=SYSFS, run=subprocess.run, which=shutil.which):
+    def __init__(self, sysfs=SYSFS, run=subprocess.run, which=which_sbin):
         self.sysfs, self.run, self.which = sysfs, run, which
         self._fdb, self._offload = {}, {}
 
@@ -118,7 +125,7 @@ class Host:
         macs = None
         if self.which("bridge"):
             try:
-                out = self.run(["bridge", "-j", "fdb", "show", "br", bridge],
+                out = self.run([self.which("bridge"), "-j", "fdb", "show", "br", bridge],
                                capture_output=True, text=True, timeout=5).stdout
                 macs = {e["mac"].lower() for e in json.loads(out or "[]")
                         if "permanent" not in (e.get("state") or "")
@@ -135,7 +142,7 @@ class Host:
         on = None
         if self.which("ethtool"):
             try:
-                out = self.run(["ethtool", "-k", name], capture_output=True, text=True,
+                out = self.run([self.which("ethtool"), "-k", name], capture_output=True, text=True,
                                timeout=5).stdout
                 for line in out.splitlines():
                     if line.strip().startswith("tx-checksumming:"):
@@ -149,8 +156,8 @@ class Host:
         if not self.which("ip"):
             return []
         try:
-            out = self.run(["ip", "-j", "addr", "show", "dev", name], capture_output=True,
-                           text=True, timeout=5).stdout
+            out = self.run([self.which("ip"), "-j", "addr", "show", "dev", name],
+                           capture_output=True, text=True, timeout=5).stdout
             return [f"{a['local']}/{a['prefixlen']}" for dev in json.loads(out or "[]")
                     for a in dev.get("addr_info", []) if a.get("scope") == "global"]
         except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
