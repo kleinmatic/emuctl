@@ -105,6 +105,7 @@ def format_info(settings, name, probe=probe_guest):
         line("os", cfg.os)
     if cfg.emulator:
         line("emulator", cfg.emulator)
+    line("kind", cfg.kind)
     line("state", row["state"] + (f"  ({row['detail']})" if row["detail"] else ""))
     if row["uptime"] is not None:
         line("uptime", uptime_str(row["uptime"]))
@@ -115,8 +116,17 @@ def format_info(settings, name, probe=probe_guest):
     line("console", f"emuctl console {cfg.name}   (broker {cfg.bind}:{cfg.broker}, shared)")
     line("serials", ", ".join(str(p) for p in cfg.serials)
          + "   (held by the supervisor; do not connect)")
+    if cfg.config_files:
+        line("config", ", ".join(cfg.config_files))
     if cfg.guest_addr:
         line("network", f"{cfg.guest_addr} port {cfg.guest_port}")
+    if cfg.nics:
+        line("nics", ", ".join(cfg.nics))
+    if cfg.display:
+        auth = "password" if cfg.display_auth == "vnc" else "no password"
+        line("display", f"vnc://{cfg.display[0]}:{cfg.display[1]}  ({auth})")
+    if cfg.notes:
+        line("notes", cfg.notes)
     line("logs", f"{cfg.workdir}/console.log, {cfg.workdir}/{cfg.name}.out")
     if cfg.stop_command:
         how = "runs stop_command, then stops the emulator"

@@ -14,12 +14,37 @@ VALID_STOP_MODES = ("signal", "freeze", "monitor")
 # Keys whose value may contain '#', so an inline comment cannot be stripped.
 PATTERN_KEYS = ("ready", "halted", "command", "stop_command")
 STAGED = ("boot.", "stop.", "stuck.")
+HW_PREFIX = "hw."
+KINDS = ("simh", "es40", "qemu", "gxemul", "other")
+DISPLAY_AUTH = ("none", "vnc")
 KNOWN = set(REQUIRED) | {
     "node", "os", "emulator", "env", "diskless", "bind", "halted",
     "boot_timeout", "console_timeout", "guest_addr", "guest_port",
     "stop_mode", "monitor", "stop_command", "stop_timeout", "stop_wake", "halt_grace",
-    "exclusive_with",
+    "exclusive_with", "kind", "config", "nics", "display", "display_auth",
+    "display_password_file", "notes",
 }
+# Program names that are SIMH simulators, for guessing `kind`.
+SIMH_PREFIXES = ("vax", "microvax", "rtvax", "infoserver", "pdp", "altair", "nova", "eclipse",
+                 "i1401", "i1620", "i650", "i7", "ibm1130", "sigma", "b5500", "id16", "id32",
+                 "h316", "hp2100", "hp3000", "lgp", "s3", "sds", "swtp", "tx-0", "simh")
+
+
+def guess_kind(command):
+    """The emulator kind, from the program name in `command`."""
+    prog = os.path.basename(command[0]).lower() if command else ""
+    for kind in ("es40", "qemu", "gxemul"):
+        if kind in prog:
+            return kind
+    return "simh" if prog.startswith(SIMH_PREFIXES) else "other"
+
+
+def parse_display(value):
+    """(host, port) from 'vnc://host:port'."""
+    m = re.fullmatch(r"vnc://([^:/\s]+|\[[0-9a-fA-F:]+\]):(\d{1,5})", value)
+    if not m or not 0 < int(m.group(2)) < 65536:
+        raise ConfigError(f"display must be vnc://host:port, got {value!r}")
+    return m.group(1).strip("[]"), int(m.group(2))
 
 
 class ConfigError(Exception):
@@ -62,6 +87,14 @@ class GuestConfig:
     stop_wake: bool
     exclusive_with: list
     unknown: list = field(default_factory=list)
+    kind: str = "other"
+    config_files: list = field(default_factory=list)   # absolute paths
+    nics: list = field(default_factory=list)
+    display: object = None                              # (host, port) or None
+    display_auth: str = "none"
+    display_password_file: object = None
+    notes: object = None                                # absolute path or None
+    hw: dict = field(default_factory=dict)              # label -> text, in conf order
 
     @property
     def clean_stop(self):
@@ -202,6 +235,28 @@ def parse_config(text):
     if not command:
         raise ConfigError("command is empty")
 
+    def rel(p):
+        return p if os.path.isabs(p) else os.path.join(workdir, p)
+
+    kind = kv.get("kind") or guess_kind(command)
+    if kind not in KINDS:
+        raise ConfigError(f"kind must be one of {KINDS}, got {kind!r}")
+    display = parse_display(kv["display"]) if kv.get("display") else None
+    display_auth = kv.get("display_auth", "vnc" if kv.get("display_password_file") else "none")
+    if display_auth not in DISPLAY_AUTH:
+        raise ConfigError(f"display_auth must be one of {DISPLAY_AUTH}, got {display_auth!r}")
+    if display_auth == "vnc" and not kv.get("display_password_file"):
+        raise ConfigError("display_auth = vnc needs display_password_file")
+    if (display_auth != "none" or kv.get("display_password_file")) and not display:
+        raise ConfigError("display_auth and display_password_file need display")
+    nics = [n.strip() for n in kv.get("nics", "").split(",") if n.strip()]
+    for n in nics:
+        if not re.fullmatch(r"[A-Za-z0-9_.:@-]{1,15}", n):
+            raise ConfigError(f"nics: {n!r} is not an interface name")
+    hw = {k[len(HW_PREFIX):]: v for k, v in kv.items() if k.startswith(HW_PREFIX)}
+    if any(not label for label in hw):
+        raise ConfigError("hw. keys need a label, such as hw.memory")
+
     halted = kv.get("halted")
     return GuestConfig(
         name=name, node=kv.get("node", name), os=kv.get("os", ""),
@@ -221,7 +276,15 @@ def parse_config(text):
         halt_grace=_int(kv, "halt_grace", 0),
         stop_wake=_bool(kv, "stop_wake", True),
         exclusive_with=[p.strip() for p in kv.get("exclusive_with", "").split(",") if p.strip()],
-        unknown=sorted(k for k in kv if k not in KNOWN and not k.startswith(STAGED)),
+        unknown=sorted(k for k in kv if k not in KNOWN and not k.startswith(STAGED)
+                       and not k.startswith(HW_PREFIX)),
+        kind=kind,
+        config_files=[rel(p.strip()) for p in kv.get("config", "").split(",") if p.strip()],
+        nics=nics, display=display, display_auth=display_auth,
+        display_password_file=rel(kv["display_password_file"])
+        if kv.get("display_password_file") else None,
+        notes=rel(kv["notes"]) if kv.get("notes") else None,
+        hw=hw,
     )
 
 

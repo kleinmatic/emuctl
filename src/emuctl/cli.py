@@ -256,6 +256,14 @@ def check_guest(settings, name):
     for peer in cfg.exclusive_with:
         if not os.path.exists(settings.conf_path(peer)):
             errors.append(f"exclusive_with names '{peer}', which has no conf")
+    for path in cfg.config_files:
+        if not os.path.exists(path):
+            errors.append(f"config file {path} does not exist")
+    if cfg.notes and not os.path.exists(cfg.notes):
+        warnings.append(f"notes file {cfg.notes} does not exist")
+    if cfg.display_password_file and not os.path.exists(cfg.display_password_file):
+        errors.append(f"display_password_file {cfg.display_password_file} does not exist "
+                      f"(or this user cannot see it)")
     if cfg.stop_command and not (shutil.which(cfg.stop_command[0])
                                  or os.access(cfg.stop_command[0], os.X_OK)):
         errors.append(f"stop_command {cfg.stop_command[0]} is not an executable")

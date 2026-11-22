@@ -83,6 +83,22 @@ whatever the service manager provides (for example a systemd
 
 Unknown keys are ignored, and `emuctl check` lists them.
 
+## Describing the machine
+
+These keys add nothing to how a guest runs. They tell `emuctl info`, the
+monitoring commands and the web page what the guest is and where to look.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `kind` | guessed | `simh`, `es40`, `qemu`, `gxemul` or `other`. Guessed from the program name in `command`; set it when the guess is wrong, for example a SIMH binary with an unusual name. Decides how the emulator's config file is read for hardware details. |
+| `config` | none | The emulator's own config files, comma-separated, relative to `workdir`. emuctl reads them for hardware details and never changes them. `emuctl check` reports one that is missing. QEMU takes its configuration on the command line, so QEMU guests need no `config`. |
+| `nics` | found in `config` | Host network interfaces the guest uses (taps or veths), comma-separated. Only needed when emuctl cannot find them in the emulator's config. |
+| `display` | none | A VNC server showing the guest's screen, as `vnc://host:port`. |
+| `display_auth` | `vnc` if a password file is set, else `none` | How to log in to that VNC server: `none` or `vnc` (a VNC password). |
+| `display_password_file` | none | A file holding the VNC password, relative to `workdir`. Make it readable only by the accounts that need it. |
+| `notes` | none | A text file about the guest, shown by the web page. |
+| `hw.<label>` | none | A hardware line stated by hand, such as `hw.memory = 128 MB` or `hw.cpu = R3000, 25 MHz`. Shown as given, and used in place of anything read from `config` under the same label. |
+
 ## Host settings
 
 `/etc/emuctl/emuctl.conf` (`/usr/local/etc/emuctl/emuctl.conf` on FreeBSD), all

@@ -8,6 +8,13 @@
   CPU, memory, task and I/O accounting.
 - `emuctl stop --now` skips the guest's shutdown, or ends one under way, and
   stops the emulator at once. The supervisor treats SIGUSR2 as this request.
+- A plain `emuctl stop` on a guest that is already stopping does nothing and
+  suggests `--now`. Under rc.d it used to send a second SIGTERM, which cut the
+  shutdown short.
+- New guest conf keys describe the machine: `kind`, `config`, `nics`,
+  `display`, `display_auth`, `display_password_file`, `notes` and
+  `hw.<label>` (docs/config.md). `emuctl info` shows them and `emuctl check`
+  reports named files that are missing.
 - Linux with systemd is the supported platform, Debian 13 the reference;
   the core keeps running on FreeBSD (docs/platforms.md).
 - `tools/devhost`: a throwaway host with four fake guests for trying emuctl
