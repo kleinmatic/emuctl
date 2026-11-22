@@ -59,7 +59,7 @@ br0  (LAN via eth0) 192.0.2.10/24
   vea0         other     up    ultrix-mips
 br1  (host-only)
   tap5         tap       down  aix-ppc
-warning: aix-ppc: interface tap5 is down
+warning: aix-ppc: ready, but its MAC 02:00:00:00:00:06 has not been seen on br1
 ```
 
 `emuctl net <guest>` shows one guest from its own side:
