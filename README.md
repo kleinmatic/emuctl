@@ -67,7 +67,11 @@ To try it without a real emulator, see [docs/quickstart.md](docs/quickstart.md).
 
 `sudo ./install.sh web` also sets up a web page on port 8600 that shows every
 guest, its resource use over the last hour, its hardware and the host's
-bridges, in the style of Proxmox. See [docs/web.md](docs/web.md).
+bridges, starts and stops guests and opens their serial consoles, in the
+style of Proxmox. See [docs/web.md](docs/web.md) and the
+[tour](docs/web-tour.md).
+
+![The web page's host view](docs/images/web-host.png)
 
 ## Documentation
 
@@ -82,8 +86,8 @@ bridges, in the style of Proxmox. See [docs/web.md](docs/web.md).
 - [Design](docs/design.md): why it works this way
 - [Versions and releases](docs/releasing.md)
 - [Supported platforms](docs/platforms.md)
-- Web interface: [setting it up](docs/web.md), [security](docs/web-security.md),
-  [API](docs/api.md)
+- Web interface: [setting it up](docs/web.md), [a tour](docs/web-tour.md),
+  [security](docs/web-security.md), [API](docs/api.md)
 
 ## Other tools
 

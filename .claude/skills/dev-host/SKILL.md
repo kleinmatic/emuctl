@@ -83,6 +83,10 @@ certificate, and log in as `dev`. Starting and stopping guests from the CLI
 shows on the page within 5 seconds. The CPU and memory graphs stay empty: a
 devhost has no systemd accounting.
 
+For the page with lively numbers (graphs, bridges) use `tools/webdemo`
+instead: the same fake guests, plus an invented host name, bridges and usage.
+`tools/webdemo --screenshots DIR` remakes the pictures in `docs/web-tour.md`.
+
 ## When finished
 
 ```sh

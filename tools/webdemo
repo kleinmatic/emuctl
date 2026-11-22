@@ -1,0 +1,257 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
+"""The web page with invented data: for screenshots, demos and trying the page.
+
+    tools/webdemo                     run it; prints the address and a password
+    tools/webdemo --screenshots DIR   take the screenshots in docs/web-tour.md, then stop
+
+It builds a devhost (tools/devhost) with fake guests, then runs the web daemon
+in this process with three things invented: the host name (retrohost), a
+/sys/class/net tree with two bridges and a tap per guest, and CPU, memory and
+traffic numbers that wander. Starting and stopping guests is real: the fake
+guests run tests/fake_emulator.py through devhost's stand-in systemctl.
+
+Needs Python 3.11 and aiohttp; --screenshots also needs Playwright.
+Nothing here touches the real host.
+"""
+import argparse
+import math
+import os
+import random
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "src"))
+
+HOST = "retrohost"
+# guest: (tap, bridge, MAC); invented, locally administered
+NICS = {"vax": ("tap1", "br0", "02:00:00:00:00:11"), "alpha": ("tap2", "br0", "02:00:00:00:00:12"),
+        "stuck": ("tap3", "br1", "02:00:00:00:00:13"), "twin": ("tap1", "br0", "02:00:00:00:00:11")}
+COUNTERS = ("rx_bytes", "tx_bytes", "rx_packets", "tx_packets", "rx_errors", "tx_errors",
+            "rx_dropped", "tx_dropped")
+
+
+def devhost(d):
+    out = subprocess.run([sys.executable, os.path.join(HERE, "devhost"), "up", d],
+                         capture_output=True, text=True, check=True).stdout
+    for line in out.splitlines():
+        k, v = re.fullmatch(r'export (\w+)="?(.*?)"?', line).groups()
+        os.environ[k] = v.replace("$PATH", os.environ["PATH"])
+    for name, (tap, _, mac) in NICS.items():
+        with open(os.path.join(d, "guests", f"{name}.conf"), "a") as fh:
+            fh.write(f"nics = {tap}\nhw.machine = Fake Machine 3000\nhw.memory = 64 MB\n")
+
+
+class FakeNet:
+    def __init__(self, root):
+        self.root, self.index = root, 1
+
+    def write(self, name, part, value):
+        p = os.path.join(self.root, name, part)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as fh:
+            fh.write(f"{value}\n")
+
+    def iface(self, name, kind, master=None):
+        self.index += 1
+        os.makedirs(os.path.join(self.root, name, "statistics"))
+        for part, value in (("ifindex", self.index), ("iflink", self.index), ("operstate", "up"),
+                            ("carrier", 1), ("address", f"02:fe:00:00:00:{self.index:02x}")):
+            self.write(name, part, value)
+        for c in COUNTERS:
+            self.write(name, f"statistics/{c}", 0)
+        if kind == "tap":
+            self.write(name, "tun_flags", "0x1002")
+        elif kind == "physical":
+            os.makedirs(os.path.join(self.root, name, "device"))
+        elif kind == "bridge":
+            os.makedirs(os.path.join(self.root, name, "bridge"))
+            os.makedirs(os.path.join(self.root, name, "brif"))
+        if master:
+            os.symlink(f"../{master}", os.path.join(self.root, name, "master"))
+            os.makedirs(os.path.join(self.root, master, "brif", name))
+
+
+def build_net(root):
+    net = FakeNet(root)
+    net.iface("br0", "bridge")
+    net.iface("br1", "bridge")
+    net.iface("eth0", "physical", master="br0")
+    for tap, br in sorted({(t, b) for t, b, _ in NICS.values()}):
+        net.iface(tap, "tap", master=br)
+    return net
+
+
+def run(args):
+    import asyncio
+    import dataclasses
+
+    from aiohttp import web
+
+    from emuctl import network, usage
+    from emuctl.settings import load_settings
+    from emuctl.web import app as webapp
+    from emuctl.web import data, tls
+    from emuctl.web.conf import load_web_conf
+    from emuctl.web.sampler import CachedProbe, Sampler
+
+    work = tempfile.mkdtemp(prefix="emuctl-webdemo-")
+    d = os.path.join(work, "dh")
+    devhost(d)
+    socket.gethostname = lambda: HOST
+    socket.getfqdn = lambda *a: HOST
+    net = build_net(os.path.join(work, "sys"))
+    host_factory = lambda: network.Host(sysfs=net.root, which=lambda name: None)  # noqa: E731
+    network.Host.__init__.__defaults__ = (net.root, subprocess.run, lambda name: None)
+    data._meminfo = lambda path=None: {"MemTotal": 16 * 1024 ** 3, "MemAvailable": 11 * 1024 ** 3}
+    cg_root = os.path.join(work, "cg")
+    settings = dataclasses.replace(load_settings(), elevate="none")
+    conf = load_web_conf()
+    totals = {}
+
+    class DemoSampler(Sampler):
+        """Wandering numbers for running guests, written where the real ones are read."""
+
+        def tick(self):
+            now = time.time()
+            for name in settings.guests():
+                path = os.path.join(cg_root, "demo", name)
+                os.makedirs(path, exist_ok=True)
+                t = totals.setdefault(name, {"cpu": 0.0, "rx": 0, "tx": 0, "rd": 0, "wr": 0})
+                base = {"vax": 0.06, "alpha": 0.35, "stuck": 0.02, "twin": 0.05}.get(name, 0.05)
+                load = max(0.0, base * (1 + 0.6 * math.sin(now / 40 + len(name))
+                                        + random.uniform(-0.3, 0.3)))
+                t["cpu"] += load * self.interval
+                t["rx"] += int(random.uniform(800, 9000) * self.interval)
+                t["tx"] += int(random.uniform(100, 2500) * self.interval)
+                t["rd"] += int(random.choice([0, 0, 4096, 65536]) * self.interval)
+                t["wr"] += int(random.choice([0, 4096, 16384]) * self.interval)
+                mb = {"alpha": 900, "vax": 70}.get(name, 40)
+                mem = int(mb * 2**20 * (1 + 0.02 * math.sin(now / 90)))
+                files = {"cpu.stat": f"usage_usec {int(t['cpu'] * 1e6)}\n",
+                         "memory.current": f"{mem}\n",
+                         "memory.peak": f"{int(mb * 1.05 * 2**20)}\n",
+                         "pids.current": "4\n",
+                         "io.stat": f"8:0 rbytes={t['rd']} wbytes={t['wr']} rios=1 wios=1\n"}
+                for f, text in files.items():
+                    with open(os.path.join(path, f), "w") as fh:
+                        fh.write(text)
+                tap = NICS.get(name, (None,))[0]
+                if tap:
+                    net.write(tap, "statistics/tx_bytes", t["rx"])
+                    net.write(tap, "statistics/rx_bytes", t["tx"])
+            return super().tick()
+
+    usage.control_groups = lambda s, names, **kw: {n: f"/demo/{n}" for n in names}
+    sampler = DemoSampler(settings, root=cg_root, host_factory=host_factory,
+                          probe=CachedProbe(lambda *a, **k: True))
+    app = webapp.make_app(settings, conf, sampler=sampler)
+    tls.ensure_cert(conf, hostname=HOST)
+    ctx = tls.server_context(conf.cert_path, conf.key_path)
+    port = conf.port
+    password = open(os.path.join(d, "web-password")).read().strip()
+    url = f"https://127.0.0.1:{port}/"
+    for g in ("alpha", "vax"):
+        subprocess.Popen(["emuctl", "start", g], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+
+    async def main():
+        runner = web.AppRunner(app)
+        await runner.setup()
+        await web.TCPSite(runner, "127.0.0.1", port, ssl_context=ctx).start()
+        print(f"webdemo: {url}  user dev  password {password}", flush=True)
+        try:
+            if args.screenshots:
+                await asyncio.to_thread(screenshots, url, password, args.screenshots)
+            else:
+                await asyncio.Event().wait()
+        finally:
+            await runner.cleanup()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
+    finally:
+        subprocess.run([sys.executable, os.path.join(HERE, "devhost"), "down", d],
+                       capture_output=True)
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def screenshots(url, password, out):
+    from playwright.sync_api import sync_playwright
+    os.makedirs(out, exist_ok=True)
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page(ignore_https_errors=True, viewport={"width": 1280, "height": 860})
+        pg.goto(url)
+        pg.screenshot(path=os.path.join(out, "web-login.png"))
+        pg.fill("input[name=user]", "dev")
+        pg.fill("input[name=password]", password)
+        pg.click("button[type=submit]")
+        pg.wait_for_selector("table.data")
+        print("webdemo: collecting a few minutes of graphs", flush=True)
+        time.sleep(150)
+        pg.goto(url + "#/")
+        pg.wait_for_timeout(3000)
+        pg.screenshot(path=os.path.join(out, "web-host.png"), full_page=True)
+        pg.goto(url + "#/host/network")
+        pg.wait_for_timeout(2000)
+        pg.screenshot(path=os.path.join(out, "web-host-network.png"), full_page=True)
+        pg.goto(url + "#/g/alpha/summary")
+        pg.wait_for_selector(".chart")
+        pg.wait_for_timeout(2500)
+        pg.screenshot(path=os.path.join(out, "web-guest.png"), full_page=True)
+        pg.click(".titlebar button:has-text('Stop ▾')")
+        pg.click(".menu button:has-text('Stop now')")
+        pg.wait_for_timeout(500)
+        pg.screenshot(path=os.path.join(out, "web-stop-now.png"))
+        pg.locator("dialog.dialog button:has-text('Cancel')").click()
+        pg.goto(url + "#/g/vax/console")
+        pg.wait_for_selector(".xterm-rows:has-text('login:')")
+        pg.click(".console-banner button:has-text('Take keyboard')")
+        pg.wait_for_selector(".console-banner:has-text('Typing')")
+        pg.click(".terminal")
+        pg.keyboard.type("help")
+        pg.keyboard.press("Enter")
+        pg.wait_for_timeout(1500)
+        pg.screenshot(path=os.path.join(out, "web-console.png"), full_page=True)
+        pg.click(".console-banner button:has-text('Release keyboard')")
+        pg.goto(url + "#/g/twin/summary")
+        pg.wait_for_timeout(2500)
+        pg.screenshot(path=os.path.join(out, "web-refused.png"), full_page=True)
+        for tab in ("network", "hardware", "logs"):
+            pg.goto(url + f"#/g/vax/{tab}")
+            pg.wait_for_timeout(2000)
+            pg.screenshot(path=os.path.join(out, f"web-guest-{tab}.png"), full_page=True)
+        pg.goto(url + "#/host/tasks")
+        pg.wait_for_timeout(1500)
+        pg.screenshot(path=os.path.join(out, "web-tasks.png"), full_page=True)
+        dark = b.new_page(ignore_https_errors=True, viewport={"width": 1280, "height": 860},
+                          color_scheme="dark")
+        dark.context.add_cookies(pg.context.cookies())
+        dark.goto(url + "#/g/alpha/summary")
+        dark.wait_for_selector(".chart")
+        dark.wait_for_timeout(2500)
+        dark.screenshot(path=os.path.join(out, "web-guest-dark.png"), full_page=True)
+        phone = b.new_page(ignore_https_errors=True, viewport={"width": 390, "height": 844},
+                           is_mobile=True)
+        phone.context.add_cookies(pg.context.cookies())
+        phone.goto(url)
+        phone.wait_for_selector("table.data")
+        phone.wait_for_timeout(1500)
+        phone.screenshot(path=os.path.join(out, "web-phone.png"), full_page=True)
+        b.close()
+    print(f"webdemo: screenshots in {out}", flush=True)
+
+
+if __name__ == "__main__":
+    p = argparse.ArgumentParser(description="The web page with invented data.")
+    p.add_argument("--screenshots", metavar="DIR", help="take the tour's screenshots, then stop")
+    run(p.parse_args())

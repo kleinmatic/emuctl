@@ -41,6 +41,7 @@ being built in phases; `docs/web.md` describes what exists.
 | `tools/devhost` | a throwaway host with fake guests |
 | `tools/release_check.py`, `tools/coverage_check.py` | used by CI |
 | `tools/vendor.sh` | fetches the page's third-party files at pinned versions |
+| `tools/webdemo` | the page with fake guests and invented numbers; `--screenshots` remakes `docs/images/` |
 | `docs/` | user documentation, one page per topic |
 | `.claude/skills/` | step-by-step guides for common changes (below) |
 
@@ -56,7 +57,7 @@ make a virtualenv: `uv venv && uv pip install -e '.[test]' ruff`.
 python3 -m pytest -q                              # all tests, no root, no emulator
 python3 -m pytest -q --cov=emuctl --cov-report=json   # writes coverage.json ...
 python3 tools/coverage_check.py                       # ... which this reads
-ruff check src tests tools tools/devhost
+ruff check src tests tools tools/devhost tools/webdemo
 node --test tests/js/*.test.mjs                   # the page's pure modules; needs only node
 EMUCTL_BROWSER=1 python3 -m pytest tests/browser  # Playwright; on its own, not with the rest
 eval "$(tools/devhost up)"                        # then: emuctl list, start, console, stop

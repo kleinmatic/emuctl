@@ -149,7 +149,7 @@ ROW = {"name": "g1", "node": "NODE1", "os": "Some OS", "emulator": "emu 1.0", "s
        "uptime": 65, "detail": "", "cpu_pct": 7.25, "mem_bytes": 2 * 1024 ** 2}
 LONG = dict(ROW, name="a-rather-long-guest-name", state="degraded", uptime=200000,
             cpu_pct=100.0, mem_bytes=3 * 1024 ** 3,
-            detail="192.168.100.100:23 does not answer and this detail goes on and on and on")
+            detail="192.0.2.100:23 does not answer and this detail goes on and on and on")
 
 
 def test_default_table_columns():
