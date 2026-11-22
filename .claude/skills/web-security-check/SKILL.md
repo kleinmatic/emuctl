@@ -39,5 +39,5 @@ optional for changes under `src/emuctl/web/`.
 At a phase gate, also run the `adversarial-review` skill (if available) on
 the whole branch and include its findings.
 
-> Written before the web package exists. When phase 2 lands, update the
+> Written before the web package exists. When part 3a of the web work lands, update the
 > questions to name the real middleware and lookup functions.

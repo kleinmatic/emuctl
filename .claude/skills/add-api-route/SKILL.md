@@ -6,7 +6,7 @@ description: Add or change a route in emuctl's web API (src/emuctl/web) with its
 # Add a web API route
 
 > Written before the web package exists, from the plan. The file and function
-> names below are the intended ones. When phase 2 lands, correct this skill
+> names below are the intended ones. When part 3a of the web work lands, correct this skill
 > against the real code in the same commit.
 
 Read the web security rules in `AGENTS.md` first. Every route follows them.
