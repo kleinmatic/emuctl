@@ -96,12 +96,26 @@ def cmd_status(settings, args):
     return 1 if row["state"] in ("down", "crashed", "error") else 3
 
 
-def wait_for_boot(settings, name, timeout):
+def current_state(settings, name, since):
+    """The guest's state, ignoring a final state left by a run before `since`.
+
+    Right after a start, the state file can still say `crashed` or `halted`
+    from the previous run until the new supervisor writes its own.
+    """
+    raw = read_state(settings.run_dir, name)
+    state = effective_state(raw)
+    if state in ("crashed", "halted") and (raw or {}).get("started_at", 0) < int(since) - 1:
+        return "starting"
+    return state
+
+
+def wait_for_boot(settings, name, timeout, since=None):
     """Follow a start until it settles. Returns the state it settled in."""
+    since = since or time.time()
     deadline = time.time() + timeout
     last = None
     while time.time() < deadline:
-        state = effective_state(read_state(settings.run_dir, name))
+        state = current_state(settings, name, since)
         if state != last:
             print(f"  {state}")
             last = state
@@ -126,6 +140,7 @@ def cmd_start(settings, args):
         else:
             print(plan.message)
         return plan.code
+    since = time.time()
     for argv in plan.steps:
         rc = run(argv)
         if rc != 0:
@@ -134,13 +149,13 @@ def cmd_start(settings, args):
     if not args.wait:
         # A supervisor that refuses or fails does so within a second or two.
         time.sleep(3)
-        state = effective_state(read_state(settings.run_dir, args.guest))
+        state = current_state(settings, args.guest, since)
         if state in ("down", "crashed"):
             sys.stderr.write(f"emuctl: {args.guest} did not start; see: emuctl log {args.guest}\n")
             return 1
         print(f"{args.guest}: {state}; follow it with: emuctl status {args.guest}")
         return 0
-    state = wait_for_boot(settings, args.guest, cfg.boot_timeout)
+    state = wait_for_boot(settings, args.guest, cfg.boot_timeout, since)
     return 0 if state == "ready" else 3
 
 

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `emuctl start` no longer reports `crashed` straight away when the previous
+  run had crashed; it waits for the new run's own state.
 - `emuctl list --usage` adds CPU% and memory columns. `list --json` and
   `status --json` now carry CPU time, memory, tasks, disk I/O and disk image
   sizes for each guest (docs/monitoring.md). The unit file turns on systemd's

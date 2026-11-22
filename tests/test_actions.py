@@ -293,3 +293,25 @@ def test_request_stop_now_counts_as_a_second_request():
     assert sup.stop_requests == 2
     sup.request_stop_now()
     assert sup.stop_requests == 3
+
+
+def test_a_crash_left_by_the_last_run_is_not_this_runs_result(settings, tmp_path):
+    add_guest(settings, tmp_path)
+    write_state(settings.run_dir, "g1", state="crashed", started_at=int(time.time()) - 300)
+    assert cli.current_state(settings, "g1", time.time()) == "starting"
+    write_state(settings.run_dir, "g1", state="crashed", started_at=int(time.time()))
+    assert cli.current_state(settings, "g1", time.time()) == "crashed"
+
+
+def test_start_wait_ignores_a_stale_crash(settings, tmp_path, monkeypatch, capsys):
+    add_guest(settings, tmp_path)
+    write_state(settings.run_dir, "g1", state="crashed", started_at=int(time.time()) - 300)
+    monkeypatch.setattr(cli, "load_settings", lambda: settings)
+
+    def start(argv):
+        write_state(settings.run_dir, "g1", state="ready", pid=os.getpid(),
+                    supervisor_pid=os.getpid(), cmd="", started_at=int(time.time()))
+        return 0
+    monkeypatch.setattr(cli, "run", start)
+    assert cli.main(["start", "g1", "--wait"]) == 0
+    assert "crashed" not in capsys.readouterr().out
