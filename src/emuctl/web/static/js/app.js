@@ -9,6 +9,7 @@ import { stateClass } from "./format.js";
 import { applyTheme, currentTheme, toggleTheme } from "./theme.js";
 import { hostView } from "./views/host.js";
 import { guestView } from "./views/guest.js";
+import { taskPanel } from "./views/tasks.js";
 
 applyTheme();
 
@@ -16,7 +17,17 @@ export const store = {
   session: null,
   host: null,
   rows: [],
+  tasks: [],
   listeners: new Set(),
+  taskListeners: new Set(),
+  setTasks(list) {
+    this.tasks = list;
+    for (const fn of this.taskListeners) fn(list);
+  },
+  upsertTask(t) {
+    const rest = this.tasks.filter((x) => x.id !== t.id);
+    this.setTasks([t, ...rest].sort((a, b) => b.id - a.id).slice(0, 200));
+  },
   setRows(rows) {
     this.rows = rows;
     for (const fn of this.listeners) fn(rows);
@@ -24,7 +35,7 @@ export const store = {
   row(name) { return this.rows.find((r) => r.name === name) || null; },
 };
 
-const main = document.getElementById("main");
+const main = document.getElementById("view");
 const tree = document.getElementById("tree");
 const search = document.getElementById("search");
 let view = null;
@@ -70,6 +81,8 @@ function listen() {
   es.addEventListener("guests", (ev) => {
     store.setRows(JSON.parse(ev.data));
   });
+  es.addEventListener("tasks", (ev) => store.setTasks(JSON.parse(ev.data)));
+  es.addEventListener("task", (ev) => store.upsertTask(JSON.parse(ev.data)));
   es.onerror = async () => {
     // The stream ends on logout, an expired session or a daemon restart.
     // EventSource retries by itself; check whether we are still logged in.
@@ -85,6 +98,8 @@ async function boot() {
   document.getElementById("where").textContent = `${store.host.hostname} · ${store.host.version}`;
   document.title = `emuctl · ${store.host.hostname}`;
   store.setRows(await get("/api/guests"));
+  store.setTasks(await get("/api/tasks"));
+  document.getElementById("tasks").append(taskPanel(store));
   store.listeners.add(renderTree);
   window.addEventListener("hashchange", show);
   search.addEventListener("input", renderTree);

@@ -92,7 +92,7 @@ async def test_tls_on_makes_the_cookie_secure(aiohttp_client, site):
     r = await c.post("/api/login", json={"user": "alice", "password": PASSWORD},
                      headers={"Origin": f"http://{c.host}:{c.port}"})
     assert r.cookies[webapp.COOKIE]["secure"]
-    assert "Strict-Transport-Security" in r.headers
+    assert "Strict-Transport-Security" not in r.headers     # it would cover every port
 
 
 async def test_wrong_password_and_bad_bodies(client):
@@ -111,6 +111,62 @@ async def test_logout_ends_the_session(client):
     assert (await client.get("/api/session", headers=h)).status == 200
     assert (await client.post("/api/logout", headers=h)).status == 200
     assert (await client.get("/api/session", headers=h)).status == 401
+
+
+async def test_background_refreshes_do_not_keep_a_session_alive(client):
+    h = await session(client)
+    (s,) = client.app[webapp.SESSIONS]._by_token.values()
+    s.seen -= 100
+    before = s.seen
+    await client.get("/api/guests", headers=dict(h, **{webapp.BACKGROUND_HEADER: "1"}))
+    assert s.seen == before
+    await client.get("/api/guests", headers=h)
+    assert s.seen > before
+
+
+async def test_unknown_host_names_are_refused(client):
+    h = await session(client)
+    for host in ("evil.example", "evil.example:8600", "localhost.evil.example"):
+        r = await client.get("/api/guests", headers=dict(h, Host=host))
+        assert r.status == 421, host
+    for host in ("localhost", "LOCALHOST:8600", "192.0.2.7:8600", "[::1]:8600"):
+        r = await client.get("/api/guests", headers=dict(h, Host=host,
+                                                         Origin=f"http://{host.lower()}"))
+        assert r.status == 200, host
+
+
+async def test_too_many_streams_per_session(client):
+    h = await session(client)
+    opened = [await client.get("/api/events", headers=h) for _ in range(webapp.STREAMS_PER_SESSION)]
+    assert all(r.status == 200 for r in opened)
+    assert (await client.get("/api/events", headers=h)).status == 429
+    for r in opened:
+        r.close()
+
+
+async def test_csrf_needed_for_every_unsafe_method(client):
+    h = await session(client)
+    no_token = {k: v for k, v in h.items() if k != webapp.CSRF_HEADER}
+    for method in ("PUT", "DELETE", "PATCH"):
+        r = await client.request(method, "/api/logout", headers=no_token)
+        assert r.status in (403, 405), method
+
+
+async def test_withheld_bodies_cannot_slip_past_the_limit(client, monkeypatch):
+    """Many logins whose bodies arrive late are charged as each body arrives."""
+    gate = asyncio.Event()
+    real = webapp.read_json
+
+    async def slow(request):
+        await gate.wait()
+        return await real(request)
+    monkeypatch.setattr(webapp, "read_json", slow)
+    pending = [asyncio.ensure_future(login(client, password="wrong")) for _ in range(30)]
+    await asyncio.sleep(0.3)
+    gate.set()
+    rs = await asyncio.gather(*pending)
+    assert sum(r.status == 401 for r in rs) <= 5
+    assert sum(r.status == 429 for r in rs) >= 25
 
 
 async def test_idle_session_expires(client):
@@ -273,18 +329,27 @@ async def test_logs(client, settings, tmp_path, monkeypatch):
     for q in ("source=elsewhere", "lines=many"):
         assert (await client.get(f"/api/guests/g1/log?{q}", headers=h)).status == 400
 
-    def fake_run(argv, **kw):
-        fake_run.argv = argv
-        return type("R", (), {"stdout": b"supervisor says hi\n", "stderr": b""})()
-    monkeypatch.setattr(data.subprocess, "run", fake_run)
+    import io
+
+    class FakePopen:
+        def __init__(self, argv, **kw):
+            FakePopen.argv = argv
+            self.stdout = io.BytesIO(b"supervisor says hi\n")
+
+        def kill(self):
+            pass
+
+        def wait(self):
+            return 0
+    monkeypatch.setattr(data.subprocess, "Popen", FakePopen)
     r = await client.get("/api/guests/g1/log?lines=999999", headers=h)
     assert (await r.json())["text"] == "supervisor says hi\n"
-    assert "5000" in fake_run.argv and "journalctl" in fake_run.argv
+    assert "5000" in FakePopen.argv and "journalctl" in FakePopen.argv
 
 
 async def test_console_log_under_the_env_directory_is_refused(client, tmp_path, monkeypatch):
     (tmp_path / "g1" / "console.log").write_text("password=hunter2\n")
-    monkeypatch.setattr(data, "ENV_DIR", str(tmp_path / "g1"))
+    monkeypatch.setattr(data, "PROTECTED", [str(tmp_path / "g1")])
     h = await session(client)
     r = await client.get("/api/guests/g1/log?source=console", headers=h)
     assert (await r.json()) == {"source": "console", "text": "", "missing": True}
@@ -306,6 +371,9 @@ async def test_events_stream_and_logout_closes_it(client):
     assert line == b"event: guests\n"
     payload = json.loads((await r.content.readline())[len(b"data: "):])
     assert [g["name"] for g in payload] == ["g1", "g2"]
+    await r.content.readline()
+    assert await r.content.readline() == b"event: tasks\n"
+    await r.content.readline()
     await r.content.readline()
     client.app[webapp.HUB].publish("guests", [])
     assert await r.content.readline() == b"event: guests\n"

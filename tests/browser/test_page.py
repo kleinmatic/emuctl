@@ -33,7 +33,8 @@ def daemon(settings, tmp_path):
     state = tmp_path / "state"
     auth.set_password(str(state / "users"), "alice", PASSWORD)
     wc = tmp_path / "web.conf"
-    wc.write_text(f"listen = 127.0.0.1\nport = {port}\nstate_dir = {state}\n")
+    wc.write_text(f"listen = 127.0.0.1\nport = {port}\nstate_dir = {state}\n"
+                  f"users_file = {state}/users\n")
     env = dict(os.environ, EMUCTL_WEB_CONF=str(wc), EMUCTL_GUEST_DIR=settings.guest_dir,
                EMUCTL_RUN_DIR=settings.run_dir, EMUCTL_SERVICE="systemd", PYTHONPATH=SRC)
     proc = subprocess.Popen([sys.executable, "-m", "emuctl.cli", "web", "serve"], env=env,
@@ -103,3 +104,92 @@ def test_no_console_errors_and_logout(page, daemon, guest):
     page.click("#logout")
     page.wait_for_url("**/login")
     assert errors == []
+
+
+# --- actions, against a devhost (its stand-in systemctl starts real supervisors) ---
+
+DEVHOST = os.path.join(os.path.dirname(__file__), "..", "..", "tools", "devhost")
+
+
+@pytest.fixture
+def devhost_daemon(tmp_path):
+    import re
+    d = str(tmp_path / "dh")
+    out = subprocess.run([sys.executable, DEVHOST, "up", d], capture_output=True, text=True,
+                         check=True).stdout
+    env = dict(os.environ)
+    for line in out.splitlines():
+        k, v = re.fullmatch(r'export (\w+)="?(.*?)"?', line).groups()
+        env[k] = v.replace("$PATH", os.environ["PATH"])
+    port = re.search(r"port = (\d+)", open(env["EMUCTL_WEB_CONF"]).read()).group(1)
+    password = open(os.path.join(d, "web-password")).read().strip()
+    proc = subprocess.Popen(["emuctl", "web", "serve"], env=env, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        try:
+            socket.create_connection(("127.0.0.1", int(port)), timeout=1).close()
+            break
+        except OSError:
+            time.sleep(0.2)
+    yield f"https://127.0.0.1:{port}", password
+    proc.terminate()
+    proc.wait(10)
+    subprocess.run([sys.executable, DEVHOST, "down", d], capture_output=True, env=env)
+
+
+def wait_state(page, state, timeout=40000):
+    page.wait_for_selector(f".titlebar .st-{state}", timeout=timeout)
+
+
+def test_start_shutdown_start_stop_now(page, devhost_daemon):
+    base, password = devhost_daemon
+    page.goto(base + "/")
+    page.fill("input[name=user]", "dev")
+    page.fill("input[name=password]", password)
+    page.click("button[type=submit]")
+    page.wait_for_selector("table.data")
+    page.goto(base + "/#/g/vax/summary")
+    page.wait_for_selector(".titlebar button:has-text('Start'):enabled")
+    assert page.locator(".titlebar button:has-text('Shutdown')").is_disabled()
+
+    page.click(".titlebar button:has-text('Start')")
+    page.wait_for_selector(".taskbar td:has-text('Start')")
+    wait_state(page, "ready")
+    page.wait_for_selector(".taskbar tr:has-text('Start') .res-ok")
+
+    page.click(".titlebar button:has-text('Shutdown')")            # clean: no dialog
+    wait_state(page, "down")
+    page.wait_for_selector(".taskbar tr:has-text('Shutdown') .res-ok", timeout=40000)
+
+    page.click(".titlebar button:has-text('Start')")
+    wait_state(page, "ready")
+    page.click(".titlebar button:has-text('Stop ▾')")
+    page.click(".menu button:has-text('Stop now')")
+    dialog = page.locator("dialog.dialog")
+    assert "power cut" in dialog.inner_text()
+    dialog.locator("button:has-text('Stop now')").click()
+    wait_state(page, "down")
+    page.wait_for_selector(".taskbar tr:has-text('Stop now') .res-ok", timeout=40000)
+
+    page.click(".taskbar tr:has-text('Stop now')")
+    page.wait_for_selector("dialog.dialog.wide pre.log")
+    assert "power cut" in page.locator("dialog.dialog.wide").inner_text()
+
+
+def test_refused_start_says_why(page, devhost_daemon):
+    base, password = devhost_daemon
+    page.goto(base + "/")
+    page.fill("input[name=user]", "dev")
+    page.fill("input[name=password]", password)
+    page.click("button[type=submit]")
+    page.wait_for_selector("table.data")
+    page.goto(base + "/#/g/vax/summary")
+    page.click(".titlebar button:has-text('Start')")
+    wait_state(page, "ready")
+    page.goto(base + "/#/g/twin/summary")
+    start = page.locator(".titlebar button:has-text('Start')")
+    start.wait_for()
+    page.wait_for_function(
+        "() => document.querySelector('.titlebar button')?.title.includes('exclusive')")
+    assert start.is_disabled()

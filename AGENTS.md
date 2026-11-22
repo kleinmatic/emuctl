@@ -138,7 +138,8 @@ explains them to users.
    the session cookie loses `Secure` and the daemon logs a warning.
 2. Every request except the login page needs a session: a random 256-bit
    token in a cookie marked `HttpOnly`, `Secure` and `SameSite=Strict`, kept
-   in memory, expiring after 12 hours idle.
+   in memory, expiring after 12 hours idle (timed refreshes, sent with
+   `X-Emuctl-Background: 1`, do not count) and 24 hours after login.
 3. Every request that changes something, and every WebSocket upgrade, must
    carry an `Origin` header matching the daemon's own address; POSTs also
    carry the CSRF token.
@@ -147,8 +148,9 @@ explains them to users.
 5. No shell. Every subprocess gets an argument list.
 6. A file viewer serves only paths named in the guest's conf, after resolving
    symlinks, and never anything under `/etc/emuctl/env/`.
-7. Login attempts are limited: five failures, then a growing delay per
-   address.
+7. Login attempts are limited: five failures, then a growing delay, per
+   address and per user name, checked and charged with nothing awaited in
+   between.
 8. Responses carry a Content-Security-Policy allowing only the daemon's own
    origin.
 9. Every action is written to the task log with the user's name.

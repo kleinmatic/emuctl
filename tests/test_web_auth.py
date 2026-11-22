@@ -18,7 +18,7 @@ def test_web_conf_defaults():
     c = conf.WebConf()
     assert (c.listen, c.port, c.tls) == ("0.0.0.0", 8600, True)
     assert c.self_signed and c.cert_path == "/var/lib/emuctl-web/web.crt"
-    assert c.users_path == "/var/lib/emuctl-web/users"
+    assert c.users_path == "/etc/emuctl/web-users"
 
 
 def test_web_conf_values():
@@ -174,31 +174,84 @@ def test_sessions_expire_when_idle_and_when_user_goes():
     assert s.get(None) is None and s.get("made-up") is None
 
 
-def test_login_limiter():
+def test_login_limiter_waits_double_each_time():
     clock = Clock()
     lim = auth.LoginLimiter(clock=clock)
     for _ in range(5):
-        assert lim.wait("a") == 0
-        lim.failed("a")
-    assert lim.wait("a") == 1 and lim.wait("b") == 0
-    lim.failed("a")
-    assert lim.wait("a") == 2
+        assert lim.wait("192.0.2.1") == 0
+        lim.failed("192.0.2.1")
+    assert lim.wait("192.0.2.1") == 1 and lim.wait("192.0.2.2") == 0
+    lim.failed("192.0.2.1")
+    assert lim.wait("192.0.2.1") == 2
     clock.t += 2
-    assert lim.wait("a") == 0
+    assert lim.wait("192.0.2.1") == 0
     for _ in range(20):
-        lim.failed("a")
-    assert lim.wait("a") == 300                 # capped
-    lim.succeeded("a")
-    assert lim.wait("a") == 0
+        lim.failed("192.0.2.1")
+    assert lim.wait("192.0.2.1") == 300                 # capped
+    clock.t += lim.forget + 1
+    assert lim.wait("192.0.2.1") == 0                   # forgotten after a quiet spell
 
 
-def test_login_limiter_forgets_oldest():
+def test_a_good_login_does_not_reset_the_address():
+    """Someone with one account cannot log in between guesses to reset the limit."""
+    clock = Clock()
+    lim = auth.LoginLimiter(clock=clock)
+    for _ in range(4):
+        lim.failed("192.0.2.1", "root")
+    lim.failed("192.0.2.1", "alice")
+    lim.succeeded("192.0.2.1", "alice")                 # alice's own attempt is given back
+    lim.failed("192.0.2.1", "root")
+    lim.failed("192.0.2.1", "root")
+    assert lim.wait("192.0.2.1", "bob") > 0
+
+
+def test_user_names_are_limited_across_addresses():
+    clock = Clock()
+    lim = auth.LoginLimiter(clock=clock)
+    for i in range(6):
+        lim.failed(f"192.0.2.{i}", "root")
+    assert lim.wait("198.51.100.7", "root") > 0
+    assert lim.wait("198.51.100.7", "alice") == 0
+
+
+def test_ipv6_is_limited_per_64():
+    clock = Clock()
+    lim = auth.LoginLimiter(clock=clock)
+    for i in range(6):
+        lim.failed(f"2001:db8::{i:x}")
+    assert lim.wait("2001:db8::ffff") > 0
+    assert lim.wait("2001:db8:0:1::1") == 0
+    assert lim.wait("::ffff:192.0.2.1") == 0
+    assert auth._addr_key("::ffff:192.0.2.1") == "192.0.2.1"
+    assert auth._addr_key("not an address") == "not an address"
+
+
+def test_global_failure_rate():
+    clock = Clock()
+    lim = auth.LoginLimiter(clock=clock, global_rate=10)
+    for i in range(10):
+        lim.failed(f"192.0.2.{i}")
+    assert lim.wait("198.51.100.1") > 0
+    clock.t += 61
+    assert lim.wait("198.51.100.1") == 0
+
+
+def test_login_limiter_forgets_only_old_entries():
     clock = Clock()
     lim = auth.LoginLimiter(clock=clock)
     for i in range(10001):
-        clock.t += 1
+        clock.t += 0.2
         lim.failed(f"10.0.{i // 256}.{i % 256}")
-    assert len(lim._seen) <= 5001 and "10.0.39.16" in lim._seen
+    # Pruned once past 10000: only entries quiet for `forget` seconds went.
+    assert len(lim._seen) <= 10001 and ("addr", "10.0.39.16") in lim._seen
+    assert all(clock.t - f.last <= lim.forget for f in lim._seen.values())
+
+
+def test_unreadable_users_file_means_no_users(tmp_path, caplog):
+    p = tmp_path / "users"
+    os.symlink("/etc/hostname", p)                      # never followed
+    assert auth.read_users(str(p)) == {}
+    assert "cannot read the users file" in caplog.text
 
 
 # --- emuctl web passwd ----------------------------------------------------------
@@ -206,7 +259,7 @@ def test_login_limiter_forgets_oldest():
 def test_passwd_command(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "LOG2_N", FAST)
     wc = tmp_path / "web.conf"
-    wc.write_text(f"state_dir = {tmp_path}\n")
+    wc.write_text(f"state_dir = {tmp_path}\nusers_file = {tmp_path}/users\n")
     monkeypatch.setenv("EMUCTL_WEB_CONF", str(wc))
     args = types.SimpleNamespace(user="alice", delete=False, stdin=True)
     monkeypatch.setattr("sys.stdin", io.StringIO("a long password\n"))
@@ -224,7 +277,7 @@ def test_passwd_command(tmp_path, monkeypatch):
 def test_passwd_prompts_twice(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "LOG2_N", FAST)
     monkeypatch.setenv("EMUCTL_WEB_CONF", str(tmp_path / "web.conf"))
-    (tmp_path / "web.conf").write_text(f"state_dir = {tmp_path}\n")
+    (tmp_path / "web.conf").write_text(f"state_dir = {tmp_path}\nusers_file = {tmp_path}/users\n")
     monkeypatch.setattr("sys.stdin", types.SimpleNamespace(isatty=lambda: True))
     answers = iter(["a long password", "a different one"])
     monkeypatch.setattr(web_main.getpass, "getpass", lambda prompt: next(answers))

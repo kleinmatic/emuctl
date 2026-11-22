@@ -137,7 +137,7 @@ def test_tail_bytes(tmp_path, monkeypatch):
     env.mkdir()
     (env / "g1.env").write_text("PASSWORD=x\n")
     os.symlink(env / "g1.env", tmp_path / "innocent.log")
-    monkeypatch.setattr(data, "ENV_DIR", str(env))
+    monkeypatch.setattr(data, "PROTECTED", [str(env)])
     assert data.tail_bytes(str(tmp_path / "innocent.log")) is None
     assert not data.safe_path(str(env)) and data.safe_path(str(f))
 

@@ -9,8 +9,10 @@ export class ApiError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
-async function call(method, path, body) {
+async function call(method, path, body, background = false) {
   const opts = { method, credentials: "same-origin", headers: {} };
+  // Timed refreshes say so, so they do not keep an idle session alive.
+  if (background) opts.headers["X-Emuctl-Background"] = "1";
   if (method !== "GET") opts.headers["X-CSRF-Token"] = csrf;
   if (body !== undefined) {
     opts.headers["Content-Type"] = "application/json";
@@ -28,5 +30,6 @@ async function call(method, path, body) {
 }
 
 export const get = (path) => call("GET", path);
+export const poll = (path) => call("GET", path, undefined, true);
 export const post = (path, body) => call("POST", path, body);
 export const guestPath = (name, rest = "") => `/api/guests/${encodeURIComponent(name)}${rest}`;

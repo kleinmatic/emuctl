@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // One guest: summary with graphs, network, hardware, logs.
-import { get, guestPath } from "../api.js";
+import { get, guestPath, poll } from "../api.js";
 import { chart } from "../chart.js";
 import { clear, h, kv } from "../dom.js";
 import { DASH, bytes, isUp, last, longUptime, pct, rate } from "../format.js";
+import { actionButtons } from "./actions.js";
 import { stateBadge, warningList } from "./host.js";
 
 const TABS = [["summary", "Summary"], ["network", "Network"], ["hardware", "Hardware"], ["logs", "Logs"]];
@@ -46,16 +47,26 @@ export function guestView(name, tab, store) {
   function renderHead() {
     const row = store.row(name) || detail || { name, state: "error", detail: "no such guest" };
     const sub = [row.os, row.emulator, row.node && row.node !== name ? `node ${row.node}` : null].filter(Boolean).join(" · ");
-    clear(head).append(h("h1", { text: name }), stateBadge(row), h("span", { class: "muted", text: sub }));
+    clear(head).append(h("h1", { text: name }), stateBadge(row), h("span", { class: "muted", text: sub }),
+      h("div", { class: "actions" }, actionButtons(name, detail, refreshDetail)));
   }
 
-  async function summary() {
-    const [d, u, logs, net, hw] = await Promise.all([
-      get(guestPath(name)), get(guestPath(name, "/usage")),
-      get(guestPath(name, "/log?source=console&lines=12")).catch(() => null),
-      get(guestPath(name, "/network")).catch(() => null),
-      get(guestPath(name, "/hardware")).catch(() => null),
-    ]);
+  async function refreshDetail() {
+    try { detail = await poll(guestPath(name)); } catch (e) { /* keep the last */ }
+    if (!closed) renderHead();
+  }
+
+  // Network and hardware change rarely and cost more to read: once per visit.
+  let once = null;
+  async function summary(refresh = false) {
+    const fetch = refresh ? poll : get;
+    if (!once) {
+      once = Promise.all([get(guestPath(name, "/network")).catch(() => null),
+        get(guestPath(name, "/hardware")).catch(() => null)]);
+    }
+    const [[net, hw], d, u, logs] = await Promise.all([once,
+      fetch(guestPath(name)), fetch(guestPath(name, "/usage")),
+      fetch(guestPath(name, "/log?source=console&lines=12")).catch(() => null)]);
     detail = d;
     renderHead();
     if (d.conf_error) return [h("div", { class: "error-banner", text: `The conf cannot be read: ${d.conf_error}` })];
@@ -194,20 +205,21 @@ export function guestView(name, tab, store) {
 
   const loaders = { summary, network, hardware, logs };
   let busy = false;
-  async function render() {
+  async function render(refresh = false) {
     if (busy) return;
     busy = true;
     try {
-      const parts = await loaders[tab]();
+      const parts = await loaders[tab](refresh);
       if (!closed) clear(body).append(...parts);
     } catch (e) {
       if (!closed) clear(body).append(h("div", { class: "error-banner", text: e.status === 404 ? `No guest called ${name}.` : e.message }));
     } finally { busy = false; }
   }
 
-  const onRows = () => { renderHead(); if (tab === "summary") render(); };
+  const onRows = () => { if (tab === "summary") render(true); else refreshDetail(); };
   store.listeners.add(onRows);
   renderHead();
+  if (tab !== "summary") refreshDetail();
   render();
   return { el, close() { closed = true; store.listeners.delete(onRows); } };
 }

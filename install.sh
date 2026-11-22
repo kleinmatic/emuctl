@@ -41,6 +41,12 @@ if [ "${1:-}" = uninstall ]; then
     rm -f "$bin"
     echo "removed $lib and $bin"
     echo "left in place: $svc_dst and $etc"
+    if [ -e /etc/systemd/system/emuctl-web.service ]; then
+        echo "the web interface is still set up; to remove it too:"
+        echo "  systemctl disable --now emuctl-web"
+        echo "  rm /etc/systemd/system/emuctl-web.service /etc/polkit-1/rules.d/50-emuctl-web.rules"
+        echo "  rm -r /var/lib/emuctl-web /etc/emuctl/web-users; userdel emuctl-web"
+    fi
     exit 0
 fi
 

@@ -4,6 +4,7 @@
 The page's guest list, graphs and live updates all come from here, so the
 number of browsers open does not change how often guests are looked at.
 """
+import threading
 import time
 from collections import deque
 
@@ -50,6 +51,7 @@ class Sampler:
         self.root, self.host_factory = root, host_factory
         self.rows = []
         self.history = {}           # name -> deque of points
+        self._lock = threading.Lock()   # tick() runs in a thread; series() in the event loop
         self._last = {}             # name -> (monotonic time, counters)
 
     def configs(self, names):
@@ -99,16 +101,19 @@ class Sampler:
                 point = {"t": wall, "cpu_pct": None, "mem_bytes": row.get("mem_bytes"),
                          "io_read": None, "io_write": None, "nics": {}}
             self._last[name] = (now, counters) if live else None
-            self.history.setdefault(name, deque(maxlen=self.points)).append(point)
-        for gone in set(self.history) - set(names):
-            del self.history[gone]
-            self._last.pop(gone, None)
+            with self._lock:
+                self.history.setdefault(name, deque(maxlen=self.points)).append(point)
+        with self._lock:
+            for gone in set(self.history) - set(names):
+                del self.history[gone]
+                self._last.pop(gone, None)
         self.rows = rows
         return rows
 
     def series(self, name, seconds=KEEP):
         """The guest's history as columns, the shape the graphs draw from."""
-        pts = list(self.history.get(name, ()))
+        with self._lock:
+            pts = list(self.history.get(name, ()))
         if pts:
             since = pts[-1]["t"] - seconds
             pts = [p for p in pts if p["t"] > since]

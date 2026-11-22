@@ -9,15 +9,22 @@ Every user is an admin until roles arrive; the role is in the file already so
 adding roles changes no file format.
 """
 import base64
+import contextlib
+import fcntl
+import grp
 import hashlib
 import hmac
+import ipaddress
+import logging
 import os
 import re
 import secrets
+import stat
 import tempfile
 import time
 from dataclasses import dataclass, field
 
+log = logging.getLogger("emuctl.web")
 USER_PATTERN = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}")
 ROLES = ("admin",)
 # scrypt cost: about 0.1 s and 32 MB per check on a small server.
@@ -79,19 +86,44 @@ def parse_users(text):
 
 
 def read_users(path):
+    """The users in `path`. A file that cannot be read gives no users, so
+    nobody can log in, rather than an error on every request."""
     try:
-        with open(path) as fh:
-            return parse_users(fh.read())
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     except FileNotFoundError:
         return {}
+    except OSError as exc:
+        log.warning("cannot read the users file %s: %s", path, exc)
+        return {}
+    with os.fdopen(fd) as fh:
+        return parse_users(fh.read())
 
 
-def write_users(path, users):
-    """Replace the users file, mode 0600, keeping its owner.
+@contextlib.contextmanager
+def _as_owner_of(d):
+    """Run as root, act as the owner of directory `d` for the duration.
 
-    Run as root for a daemon account, the new file takes the owner of the old
-    one, or of its directory, so the daemon can still read it.
+    The state directory belongs to the daemon's account. If root worked in it
+    directly, that account could swap a file for a symlink between root's
+    steps and have root change some other file. As the directory's owner,
+    root can do nothing there the account could not do itself.
     """
+    if os.geteuid() != 0:
+        yield
+        return
+    st = os.lstat(d)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        raise AuthError(f"{d} is not a directory")
+    os.setegid(st.st_gid)
+    os.seteuid(st.st_uid)
+    try:
+        yield
+    finally:
+        os.seteuid(0)
+        os.setegid(0)
+
+
+def _check_dir(path):
     d = os.path.dirname(path) or "."
     if not os.path.isdir(d):
         if os.geteuid() == 0:
@@ -99,16 +131,38 @@ def write_users(path, users):
             raise AuthError(f"{d} does not exist; start emuctl-web once (it makes the "
                             f"directory), then run this again")
         os.makedirs(d)
-    ref = path if os.path.exists(path) else d
-    st = os.stat(ref)
+    return d
+
+
+DAEMON_GROUP = "emuctl-web"
+
+
+def _daemon_gid():
+    try:
+        return grp.getgrnam(DAEMON_GROUP).gr_gid
+    except KeyError:
+        return None
+
+
+def write_users(path, users):
+    """Replace the users file. Call inside _update().
+
+    Written by root in a root-owned directory (the default, /etc/emuctl), it is
+    root's, mode 0640, group emuctl-web: the daemon can read it but not change
+    it. Anywhere else it is the writer's own, mode 0600.
+    """
+    d = os.path.dirname(path) or "."
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".users.")
     try:
+        gid = _daemon_gid() if os.geteuid() == 0 else None
+        if gid is not None:
+            os.fchown(fd, 0, gid)
+            os.fchmod(fd, 0o640)
+        else:
+            os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w") as fh:
             for u in users.values():
                 fh.write(f"{u.name}:{u.role}:{u.hash}\n")
-        os.chmod(tmp, 0o600)
-        if os.geteuid() == 0:
-            os.chown(tmp, st.st_uid, st.st_gid)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -118,22 +172,38 @@ def write_users(path, users):
         raise
 
 
+@contextlib.contextmanager
+def _update(path):
+    """Read, change and write the users file under a lock, as its directory's owner."""
+    d = _check_dir(path)
+    root_dir = os.lstat(d).st_uid == 0
+    with (contextlib.nullcontext() if root_dir else _as_owner_of(d)):
+        lock = os.open(os.path.join(d, ".users.lock"), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
+                       0o600)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            users = read_users(path)
+            yield users
+            write_users(path, users)
+        finally:
+            os.close(lock)
+
+
 def set_password(path, name, password, role="admin"):
     if not USER_PATTERN.fullmatch(name):
         raise AuthError("a user name is letters, digits, '_', '.' or '-', up to 32 characters")
     if len(password) < MIN_PASSWORD:
         raise AuthError(f"the password must be at least {MIN_PASSWORD} characters")
-    users = read_users(path)
-    users[name] = User(name, role, hash_password(password))
-    write_users(path, users)
+    h = hash_password(password)
+    with _update(path) as users:
+        users[name] = User(name, role, h)
 
 
 def delete_user(path, name):
-    users = read_users(path)
-    if name not in users:
-        raise AuthError(f"no such user: {name}")
-    del users[name]
-    write_users(path, users)
+    with _update(path) as users:
+        if name not in users:
+            raise AuthError(f"no such user: {name}")
+        del users[name]
 
 
 class Users:
@@ -167,6 +237,7 @@ class Users:
 
 
 IDLE = 12 * 3600
+MAX_AGE = 24 * 3600         # however busy, a session ends a day after logging in
 
 
 @dataclass
@@ -181,8 +252,8 @@ class Session:
 class Sessions:
     """Sessions in memory. A restart of the daemon logs everyone out."""
 
-    def __init__(self, users, idle=IDLE, clock=time.time):
-        self.users, self.idle, self.clock = users, idle, clock
+    def __init__(self, users, idle=IDLE, max_age=MAX_AGE, clock=time.time):
+        self.users, self.idle, self.max_age, self.clock = users, idle, max_age, clock
         self._by_token = {}
         self.on_end = []            # callbacks(token), for open streams
 
@@ -195,12 +266,14 @@ class Sessions:
 
     def get(self, token, touch=True):
         """The live session for `token`, or None. A session ends after IDLE
-        seconds without a request, or when its user is removed."""
+        seconds without a request the user made (the page's own refreshes pass
+        touch=False), MAX_AGE seconds after login, or when its user is removed."""
         s = self._by_token.get(token) if isinstance(token, str) else None
         if s is None:
             return None
         now = self.clock()
-        if now - s.seen > self.idle or self.users.get(s.user) is None:
+        if (now - s.seen > self.idle or now - s.created > self.max_age
+                or self.users.get(s.user) is None):
             self.end(token)
             return None
         if touch:
@@ -214,8 +287,22 @@ class Sessions:
 
     def _prune(self, now):
         for tok, s in list(self._by_token.items()):
-            if now - s.seen > self.idle:
+            if now - s.seen > self.idle or now - s.created > self.max_age:
                 self.end(tok)
+
+
+def _addr_key(addr):
+    """One key per IPv4 address, and per /64 for IPv6, since anyone with one
+    IPv6 address usually has the whole /64."""
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return addr
+    if ip.version == 6:
+        if ip.ipv4_mapped:
+            return str(ip.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{ip}/64", strict=False))
+    return str(ip)
 
 
 @dataclass
@@ -226,29 +313,62 @@ class _Failures:
 
 @dataclass
 class LoginLimiter:
-    """Five failures free per address, then a wait that doubles each time,
-    up to MAX_WAIT seconds. A success clears the address."""
+    """Counts failed logins per address and per user name.
+
+    Five failures are free, then each further try waits twice as long as the
+    last, up to max_wait. A count is forgotten `forget` seconds after its last
+    failure. A good login clears its user name's count, never the address's,
+    so a valid account cannot be used to reset the limit for guessing others.
+    Across everyone, more than `global_rate` failures a minute makes every
+    login wait.
+    """
     free: int = 5
     max_wait: float = 300
+    forget: float = 900
+    global_rate: int = 60
     clock: object = time.time
     _seen: dict = field(default_factory=dict)
+    _recent: list = field(default_factory=list)
 
-    def wait(self, addr):
-        """Seconds before `addr` may try again; 0 means now."""
-        f = self._seen.get(addr)
-        if not f or f.count < self.free:
+    def _wait_for(self, key, now):
+        f = self._seen.get(key)
+        if not f or now - f.last > self.forget:
+            return 0
+        if f.count < self.free:
             return 0
         delay = min(2 ** (f.count - self.free), self.max_wait)
-        return max(0, f.last + delay - self.clock())
+        return max(0, f.last + delay - now)
 
-    def failed(self, addr):
+    def wait(self, addr, user=None):
+        """Seconds before this address (and user name) may try again; 0 means now."""
         now = self.clock()
-        f = self._seen.setdefault(addr, _Failures())
-        f.count += 1
-        f.last = now
-        if len(self._seen) > 10000:             # forget the oldest, never the newest
-            for a, old in sorted(self._seen.items(), key=lambda kv: kv[1].last)[:5000]:
-                del self._seen[a]
+        self._recent = [t for t in self._recent if now - t < 60]
+        busy = 0
+        if len(self._recent) >= self.global_rate:
+            busy = self._recent[0] + 60 - now
+        keys = [("addr", _addr_key(addr))] + ([("user", user)] if user else [])
+        return max([busy] + [self._wait_for(k, now) for k in keys])
 
-    def succeeded(self, addr):
-        self._seen.pop(addr, None)
+    def failed(self, addr, user=None):
+        now = self.clock()
+        self._recent.append(now)
+        for key in [("addr", _addr_key(addr))] + ([("user", user)] if user else []):
+            f = self._seen.get(key)
+            if not f or now - f.last > self.forget:
+                f = self._seen[key] = _Failures()
+            f.count += 1
+            f.last = now
+        if len(self._seen) > 10000:
+            for k, old in list(self._seen.items()):
+                if now - old.last > self.forget:
+                    del self._seen[k]
+
+    def succeeded(self, addr, user=None):
+        """A good login: undo the failure charged for this attempt, and clear the user name."""
+        f = self._seen.get(("addr", _addr_key(addr)))
+        if f and f.count > 0:
+            f.count -= 1
+        if self._recent:
+            self._recent.pop()
+        if user:
+            self._seen.pop(("user", user), None)

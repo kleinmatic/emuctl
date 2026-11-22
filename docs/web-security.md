@@ -33,20 +33,30 @@ These are the rules every change to the web code follows (they are also in
    `Secure` flag and logs a warning at every start.
 2. **Sessions.** Logging in sets a random 256-bit token in a cookie marked
    `HttpOnly`, `Secure` (unless TLS is off) and `SameSite=Strict`. Sessions
-   live in the daemon's memory and end after 12 hours without a request, on
-   logout, when the user is removed, or when the daemon restarts.
+   live in the daemon's memory and end after 12 hours in which the user did
+   nothing (the page's own timed refreshes do not count, so a forgotten tab
+   still times out), 24 hours after logging in whatever happens, on logout,
+   when the user is removed, or when the daemon restarts.
 3. **Requests from other sites are refused.** Every request that changes
    something, and every WebSocket, must carry an `Origin` header naming the
-   page's own address. Every POST also carries a per-session CSRF token in a
-   header.
+   page's own address, and every one but a WebSocket carries a per-session
+   CSRF token in a header. The page also answers only to IP addresses and
+   names it knows (see "Host names" in [web.md](web.md)), which stops DNS
+   rebinding.
 4. **Guest names are checked** against the conf-name pattern and the list of
    real guests before anything uses them. Anything else is a 404.
 5. **No shell.** Every program the daemon runs gets an argument list.
-6. **File reads are limited** to the files a guest's conf names, each guest's
-   `console.log`, and the emulator configs, after following symlinks.
-   Nothing under `/etc/emuctl/env/` is ever read, even through a symlink.
-7. **Login attempts are limited:** five failures per address, then a wait
-   that doubles with each failure, up to five minutes. A success clears it.
+6. **File reads are limited** to each guest's `console.log`, which must
+   really be inside its workdir (a symlink there is refused), and the
+   emulator configs its conf names. Nothing under `/etc/emuctl/env/`, and
+   none of the daemon's own files (its key, users file and state), is ever
+   read, even through a symlink.
+7. **Login attempts are limited**, per address (per /64 for IPv6) and per
+   user name: five failures, then a wait that doubles with each failure, up
+   to five minutes, forgotten after 15 quiet minutes. A good login clears only
+   its own user name, so one valid account cannot be used to reset the limit
+   while guessing others. Over 60 failures a minute from everyone together
+   makes every login wait.
 8. **Content-Security-Policy** allows scripts, styles, fonts and connections
    from the daemon's own address only. The page loads nothing from the
    internet; its third-party files (fonts, xterm.js) are in the package.
@@ -55,8 +65,11 @@ These are the rules every change to the web code follows (they are also in
 
 Also: the page builds everything from text, never HTML from the server, so a
 guest name or console line cannot inject markup. Responses carry
-`X-Frame-Options: DENY` and `X-Content-Type-Options: nosniff`, and
-`Strict-Transport-Security` when TLS is on.
+`X-Frame-Options: DENY` and `X-Content-Type-Options: nosniff`. There is no
+`Strict-Transport-Security`, because it would apply to every port on the
+host's name. The daemon runs with systemd's sandboxing (read-only system,
+no new privileges, a system-call filter) and limits on memory, tasks and
+open files.
 
 ### Things to know
 
@@ -73,6 +86,9 @@ guest name or console line cannot inject markup. Responses carry
   limit in front instead.
 - **The daemon's account is in `systemd-journal`** and in the guests' group;
   see [web.md](web.md) for what that exposes.
+- **The task log is written by the daemon**, so someone who took over the
+  daemon's account could change it. It records what was done through the
+  page; it is not tamper-proof evidence.
 
 ## Reporting a problem
 

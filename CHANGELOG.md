@@ -9,6 +9,10 @@
   serves HTTPS on port 8600 with a self-signed certificate made on first
   start, has its own users (`emuctl web passwd`), and runs as its own
   account. `sudo ./install.sh web` sets it up.
+- The web page can start guests and stop them cleanly, by force or at once,
+  asking before anything that is a power cut. Each action is a task with
+  its output, recorded with the user's name in a task log. Start is
+  disabled, with the reason, when the start guard would refuse.
 
 - `emuctl list` shows GUEST, STATE, UPTIME and DETAIL and fits in 80 columns.
   `--node`, `--os` and `--emulator` add those columns back; `--usage` adds

@@ -8,7 +8,12 @@ Every route except `POST /api/login` needs the session cookie. Every POST
 also needs the `X-CSRF-Token` header and an `Origin` header naming the
 daemon's own address (see [web-security.md](web-security.md)). Errors come
 back as `{"error": "..."}` with a 4xx status: 401 not logged in, 403 refused,
-404 no such guest, 429 too many failed logins.
+404 no such guest, 421 a host name the daemon does not know (see
+[web.md](web.md)), 429 too many failed logins or open event streams.
+
+A client that polls on a timer should send `X-Emuctl-Background: 1`; such
+requests do not count as activity, so an unattended page still lets the
+session time out.
 
 "Role" is the least a user needs. Until roles arrive every user is an admin,
 so every route is open to every logged-in user.
@@ -119,12 +124,51 @@ removed; when there is none yet, `text` is empty and `missing` is true.
 `supervisor` is the supervisor's journal, as `emuctl log` shows it. `lines`
 is 1 to 5000, default 200.
 
+## Actions
+
+Every action is a task: it is recorded with the user's name, shown to every
+open page, and appended to the daemon's task log. The answer comes at once,
+with the task still running; follow it with `GET /api/tasks/{id}` or the
+`task` event. A refused action is a finished task whose `result` is
+`refused` and whose `message` says why, not an HTTP error. A guest has one
+task at a time, except that a stop-now may cut short a stop under way.
+
+### `POST /api/guests/{guest}/start` (operator)
+
+Runs `emuctl start <guest>`.
+
+```json
+{"id": 7, "user": "alice", "guest": "vax", "action": "start", "label": "Start",
+ "started": 1795365600.2, "ended": null, "result": "running", "message": "",
+ "output": [], "rc": null}
+```
+
+### `POST /api/guests/{guest}/stop` (operator)
+
+Body `{"mode": "clean"}`, `{"mode": "force"}` or `{"mode": "now"}`, which
+run `emuctl stop`, `emuctl stop --force` and `emuctl stop --now`
+([stopping.md](stopping.md)). `force` and `now` are a power cut for the
+guest; the page asks before sending them.
+
+### `GET /api/tasks` (viewer)
+
+The last 200 tasks, newest first, without their output. `result` is one of
+`running`, `ok`, `failed`, `refused`, `skipped` (nothing to do, such as
+starting a guest that is already up) and `note` (a record, such as taking a
+console's keyboard).
+
+### `GET /api/tasks/{id}` (viewer)
+
+One task with `output`: what the `emuctl` command printed, up to 200 lines.
+
 ## Live updates
 
 ### `GET /api/events` (viewer)
 
 Server-sent events. `guests` carries the full array of guest rows, once on
-connect and then after every sample (every 5 seconds). A comment line every
+connect and then after every sample (every 5 seconds). `tasks` carries the
+task list once on connect; `task` carries one task (without output) each
+time one starts or finishes. A session may have four streams open. A comment line every
 15 seconds keeps the connection open. The stream ends on logout or when the
 session expires.
 

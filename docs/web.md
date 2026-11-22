@@ -46,7 +46,9 @@ It does not start or enable anything. Then:
    `enable` if it should not start at boot.
 
 3. **Add a user.** `sudo emuctl web passwd <name>` asks for a password twice
-   and stores a scrypt hash. Every user can do everything for now; roles come
+   and stores a scrypt hash in `/etc/emuctl/web-users`. That file is root's,
+   mode 0640, group `emuctl-web`: the daemon can read it but cannot add users
+   to it. Every user can do everything for now; roles come
    in a later release. `sudo emuctl web passwd <name> --delete` removes one,
    and ends that user's sessions within a request.
 
@@ -71,9 +73,19 @@ tls = on                # off serves plain HTTP; see below
 tls_cert =              # empty: a self-signed certificate in state_dir
 tls_key =
 state_dir = /var/lib/emuctl-web
-users_file =            # empty: state_dir/users
+users_file = /etc/emuctl/web-users
 task_log = /var/log/emuctl/web-tasks.log
+server_names =          # other names the page is reached by, comma-separated
 ```
+
+### Host names
+
+The page answers only to an IP address or to a name it knows: the host's
+own name, its short name, `<short name>.local`, `localhost`, and whatever
+`server_names` lists. Anything else gets "unknown host name". This stops a
+web page elsewhere from pointing its own name at your host to talk to the
+daemon (DNS rebinding). If you reach it by another name, a DNS alias say,
+add that name to `server_names`.
 
 ### The certificate
 
@@ -81,7 +93,8 @@ On its first start the daemon makes a self-signed certificate and key with
 the `openssl` program and keeps them in `state_dir` (`web.crt`, and `web.key`
 with mode 0600). It reuses them after that. It is valid for ten years for the
 host's name, its short name, `<short name>.local`, `localhost`, `127.0.0.1`
-and `::1`.
+and `::1`. It is marked as a server certificate only, never a certificate
+authority, so trusting it in a browser trusts this daemon and nothing else.
 
 To use your own, for example from a homelab CA, set both `tls_cert` and
 `tls_key` to files the `emuctl-web` account can read. The daemon never
@@ -127,6 +140,8 @@ starts the graphs again.
 - **Numbers show as "—".** See [monitoring.md](monitoring.md). Disk sizes
   need the account to be able to see into the workdir (step 1 above).
 - **"No users" in the log.** Run step 3.
-- **`emuctl web passwd` says the directory does not exist.** Start the
-  service once first; systemd creates `/var/lib/emuctl-web` owned by the
-  account.
+- **"unknown host name".** You reached it by a name it does not know; add
+  the name to `server_names`.
+- **The page logs you out.** A session ends after 12 hours without you doing
+  anything (the page's own timed refreshes do not count), a day after
+  logging in, or when the daemon restarts.

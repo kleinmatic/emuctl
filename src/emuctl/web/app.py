@@ -10,29 +10,37 @@ Security rules (AGENTS.md) enforced here, in one place:
   6  file access .................... data.safe_path, data.tail_bytes
   7  login limit .................... login(), auth.LoginLimiter
   8  CSP ............................ add_security_headers
-  9  task log ....................... tasks.py (part 3b)
+  9  task log ....................... tasks.py; every action route goes through it
 Every route handler is marked @public or @needs(role). A handler with
 neither is refused, so a route cannot be added open by mistake.
 """
 import asyncio
+import concurrent.futures
+import ipaddress
 import json
 import logging
 import math
 import os
+import socket
 
 from aiohttp import web
 from aiohttp.web_urldispatcher import StaticResource
 
 from .. import full_version
 from ..config import NAME_PATTERN, ConfigError, load_config
-from . import data
+from . import data, tls
 from .auth import LoginLimiter, Sessions, Users
 from .sampler import Sampler
+from .tasks import Tasks
 
 log = logging.getLogger("emuctl.web")
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 COOKIE = "emuctl_session"
 CSRF_HEADER = "X-CSRF-Token"
+BACKGROUND_HEADER = "X-Emuctl-Background"
+STREAMS_PER_SESSION = 4
+BODY_TIMEOUT = 10           # seconds to send a request body
+WRITE_TIMEOUT = 30          # seconds a page may take to accept an event
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
        "font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
        "form-action 'self'")
@@ -48,6 +56,7 @@ SESSIONS = web.AppKey("sessions", Sessions)
 LIMITER = web.AppKey("limiter", LoginLimiter)
 SAMPLER = web.AppKey("sampler", Sampler)
 HUB = web.AppKey("hub", object)
+TASKS = web.AppKey("tasks", Tasks)
 STATE = web.AppKey("state", dict)
 
 
@@ -86,11 +95,29 @@ async def add_security_headers(request, response):
     h.setdefault("X-Frame-Options", "DENY")
     h.setdefault("Referrer-Policy", "no-referrer")
     h.setdefault("Cache-Control", "no-store" if request.path.startswith("/api/") else "no-cache")
-    if request.app[CONF].tls:
-        h.setdefault("Strict-Transport-Security", "max-age=31536000")
+    # No Strict-Transport-Security: it would apply to every port on the host
+    # name for a year, not just this one.
 
 
 # --- rules 2 and 3 ------------------------------------------------------------
+
+def host_ok(request):
+    """The browser asked for this host by an address or by a name it is known
+    by. An IP address cannot be rebound; a name must be the host's own (as in
+    its certificate) or one listed in server_names. This stops DNS rebinding:
+    a page on another site whose name has been pointed at this host."""
+    host = (request.host or "").lower()
+    if host.startswith("["):
+        name = host[1:host.find("]")] if "]" in host else host
+    else:
+        name = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        pass
+    return name.rstrip(".") in request.app[STATE]["names"]
+
 
 def own_origin(request):
     return f"{request.scheme}://{request.host}"
@@ -124,14 +151,21 @@ def is_public(request):
 
 @web.middleware
 async def auth_middleware(request, handler):
+    if not host_ok(request):
+        log.warning("refused a request for host %r from %s (add it to server_names in "
+                    "web.conf if it is one of ours)", request.host, request.remote)
+        raise refuse(request, web.HTTPMisdirectedRequest, "unknown host name")
     if changes_something(request) and not origin_ok(request):
-        log.warning("refused %s %s from %s: Origin %r is not %s", request.method, request.path,
+        log.warning("refused %s %r from %s: Origin %r is not %s", request.method, request.path,
                     request.remote, request.headers.get("Origin"), own_origin(request))
         raise refuse(request, web.HTTPForbidden, "request from another site refused")
     if is_public(request):
         return await handler(request)
 
-    session = request.app[SESSIONS].get(request.cookies.get(COOKIE))
+    # The page's own timed refreshes say so, and do not count as the user
+    # being active: a forgotten tab still lets the session time out.
+    background = request.headers.get(BACKGROUND_HEADER) == "1"
+    session = request.app[SESSIONS].get(request.cookies.get(COOKIE), touch=not background)
     if session is None:
         if request.path.startswith("/api/"):
             raise json_error(web.HTTPUnauthorized, "not logged in")
@@ -140,7 +174,7 @@ async def auth_middleware(request, handler):
     role = getattr(request.match_info.handler, "role", None)
     if role is None or user is None or ROLE_RANK[user.role] < ROLE_RANK[role]:
         raise refuse(request, web.HTTPForbidden, "not allowed")
-    if request.method == "POST" and not csrf_ok(request, session):
+    if request.method not in SAFE_METHODS and not csrf_ok(request, session):
         raise refuse(request, web.HTTPForbidden, "missing or wrong CSRF token")
     request["session"], request["user"] = session, user
     return await handler(request)
@@ -233,9 +267,11 @@ async def read_json(request):
     if request.content_type != "application/json":
         raise json_error(web.HTTPUnsupportedMediaType, "send JSON")
     try:
-        body = await request.json()
+        body = await asyncio.wait_for(request.json(), BODY_TIMEOUT)
     except ValueError:
         raise json_error(web.HTTPBadRequest, "not valid JSON")
+    except asyncio.TimeoutError:
+        raise json_error(web.HTTPRequestTimeout, "the request body did not arrive")
     if not isinstance(body, dict):
         raise json_error(web.HTTPBadRequest, "send a JSON object")
     return body
@@ -246,25 +282,26 @@ async def read_json(request):
 async def login(request):
     app, addr = request.app, request.remote or "?"
     limiter = app[LIMITER]
-    wait = limiter.wait(addr)
-    if wait > 0:
-        raise json_error(web.HTTPTooManyRequests,
-                         f"too many failed logins; try again in {math.ceil(wait)} s",
-                         headers={"Retry-After": str(math.ceil(wait))})
     body = await read_json(request)
     name, password = body.get("user"), body.get("password")
     if not (isinstance(name, str) and isinstance(password, str)
             and 0 < len(name) <= 64 and len(password) <= 1024):
         raise json_error(web.HTTPBadRequest, "send user and password")
-    # Counted as a failure before the check and cleared on success, so many
-    # attempts sent at once cannot all slip in before the limit applies.
-    limiter.failed(addr)
-    async with app[STATE]["login_checks"]:
-        user = await asyncio.to_thread(app[USERS].check, name, password)
+    # Checked and charged together, with nothing awaited in between, so many
+    # attempts sent at once cannot all pass the check before any is counted.
+    # A good password gives the charge back.
+    wait = limiter.wait(addr, name)
+    if wait > 0:
+        raise json_error(web.HTTPTooManyRequests,
+                         f"too many failed logins; try again in {math.ceil(wait)} s",
+                         headers={"Retry-After": str(math.ceil(wait))})
+    limiter.failed(addr, name)
+    loop = asyncio.get_running_loop()
+    user = await loop.run_in_executor(app[STATE]["login_pool"], app[USERS].check, name, password)
     if user is None:
         log.warning("failed login for %r from %s", name[:64], addr)
         raise json_error(web.HTTPUnauthorized, "wrong user name or password")
-    limiter.succeeded(addr)
+    limiter.succeeded(addr, name)
     session = app[SESSIONS].new(user.name)
     log.info("%s logged in from %s", user.name, addr)
     resp = web.json_response({"user": user.name, "role": user.role, "csrf": session.csrf})
@@ -312,12 +349,27 @@ async def host(request):
     return web.json_response(out)
 
 
+NET_CACHE = 10     # seconds; the network report runs ip, bridge and ethtool
+
+
+async def cached(app, key, build):
+    """The result of build() in a thread, shared by every page for NET_CACHE seconds."""
+    cache = app[STATE]["net_cache"]
+    now = asyncio.get_running_loop().time()
+    hit = cache.get(key)
+    if hit and now - hit[0] < NET_CACHE:
+        return hit[1]
+    out = await asyncio.to_thread(build)
+    cache[key] = (now, out)
+    return out
+
+
 @routes.get("/api/host/network")
 @needs("viewer")
 async def host_network(request):
     from .. import network
-    return web.json_response(await asyncio.to_thread(network.host_network,
-                                                     request.app[SETTINGS]))
+    s = request.app[SETTINGS]
+    return web.json_response(await cached(request.app, "host", lambda: network.host_network(s)))
 
 
 @routes.get("/api/guests")
@@ -359,7 +411,7 @@ async def guest_network(request):
         rep["warnings"] += [w for w in network.host_network(s, host)["warnings"]
                             if w.startswith(f"{name}: uses ")]
         return rep
-    return web.json_response(await asyncio.to_thread(build))
+    return web.json_response(await cached(request.app, ("guest", name), build))
 
 
 @routes.get("/api/guests/{g}/hardware")
@@ -391,16 +443,63 @@ async def guest_log(request):
     return web.json_response({"source": source, "text": text})
 
 
+# --- actions --------------------------------------------------------------------
+
+STOP_ACTIONS = {"clean": "shutdown", "force": "stop", "now": "stop-now"}
+
+
+@routes.post("/api/guests/{g}/start")
+@needs("operator")
+async def guest_start(request):
+    t = await request.app[TASKS].submit(request["user"].name, request["guest"], "start")
+    return web.json_response(t.public())
+
+
+@routes.post("/api/guests/{g}/stop")
+@needs("operator")
+async def guest_stop(request):
+    body = await read_json(request)
+    action = STOP_ACTIONS.get(body.get("mode")) if isinstance(body.get("mode"), str) else None
+    if action is None:
+        raise json_error(web.HTTPBadRequest, "mode must be clean, force or now")
+    t = await request.app[TASKS].submit(request["user"].name, request["guest"], action)
+    return web.json_response(t.public())
+
+
+@routes.get("/api/tasks")
+@needs("viewer")
+async def task_list(request):
+    return web.json_response(request.app[TASKS].list())
+
+
+@routes.get("/api/tasks/{id}")
+@needs("viewer")
+async def task_one(request):
+    try:
+        t = request.app[TASKS].get(int(request.match_info["id"]))
+    except ValueError:
+        t = None
+    if t is None:
+        raise json_error(web.HTTPNotFound, "no such task")
+    return web.json_response(t.public())
+
+
 @routes.get("/api/events")
 @needs("viewer")
 async def events(request):
     app, token = request.app, request["session"].token
+    if sum(t == token for t in app[HUB].subs.values()) >= STREAMS_PER_SESSION:
+        raise json_error(web.HTTPTooManyRequests, "too many open pages for this session")
     resp = web.StreamResponse(headers={"Content-Type": "text/event-stream",
                                        "X-Accel-Buffering": "no"})
     await resp.prepare(request)
     q = app[HUB].subscribe(token)
+
+    async def send(data):
+        await asyncio.wait_for(resp.write(data), WRITE_TIMEOUT)
     try:
-        await resp.write(sse("guests", await current_rows(app)))
+        await send(sse("guests", await current_rows(app)))
+        await send(sse("tasks", app[TASKS].list()))
         while True:
             try:
                 event, payload = await asyncio.wait_for(q.get(), HEARTBEAT)
@@ -408,8 +507,8 @@ async def events(request):
                 event, payload = None, None
             if event is END or app[SESSIONS].get(token, touch=False) is None:
                 break
-            await resp.write(sse(event, payload) if event else b": ping\n\n")
-    except (ConnectionResetError, asyncio.CancelledError):
+            await send(sse(event, payload) if event else b": ping\n\n")
+    except (ConnectionResetError, asyncio.CancelledError, asyncio.TimeoutError):
         pass
     finally:
         app[HUB].unsubscribe(q)
@@ -432,6 +531,8 @@ async def sample_forever(app):
 
 async def end_streams(app):
     app[HUB].close_all()        # open pages would otherwise hold a shutdown for a minute
+    await app[TASKS].close()
+    app[STATE]["login_pool"].shutdown(wait=False)
 
 
 async def start_background(app):
@@ -449,6 +550,15 @@ async def stop_background(app):
                 pass
 
 
+def known_names(conf):
+    names = set(tls.names_for(socket.gethostname())) | set(conf.server_names)
+    try:
+        names.add(socket.getfqdn().lower())
+    except OSError:
+        pass
+    return {n.lower().rstrip(".") for n in names}
+
+
 def make_app(settings, conf, users=None, sampler=None, background=True):
     app = web.Application(middlewares=[auth_middleware, guest_middleware],
                           client_max_size=64 * 1024)
@@ -460,7 +570,17 @@ def make_app(settings, conf, users=None, sampler=None, background=True):
     hub = Hub()
     app[HUB] = hub
     app[SESSIONS].on_end.append(hub.end_session)
-    app[STATE] = {"tick": asyncio.Lock(), "login_checks": asyncio.Semaphore(LOGIN_CHECKS)}
+    app[TASKS] = Tasks(settings, conf.task_log, hub.publish)
+    app[STATE] = {
+        "tick": asyncio.Lock(),
+        # scrypt gets threads of its own, so logins cannot starve the sampler
+        "login_pool": concurrent.futures.ThreadPoolExecutor(LOGIN_CHECKS, "login"),
+        "names": known_names(conf),
+        "net_cache": {},
+    }
+    for p in (conf.state_dir, conf.cert_path, conf.key_path, conf.users_path):
+        if p not in data.PROTECTED:
+            data.PROTECTED.append(p)
     app.on_response_prepare.append(add_security_headers)
     app.router.add_routes(routes)
     app.router.add_static("/static/", STATIC, follow_symlinks=False)

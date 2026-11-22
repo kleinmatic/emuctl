@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // The host: summary cards, every guest, the bridges and the warnings.
-import { get } from "../api.js";
+import { get, poll } from "../api.js";
 import { clear, h } from "../dom.js";
 import { bytes, isUp, longUptime, pct, stateClass, uptime } from "../format.js";
+import { taskTable } from "./tasks.js";
 
 const NET_EVERY = 30000;      // the network report runs ip, bridge and ethtool; not every tick
 
@@ -22,13 +23,15 @@ function stat(label, value, fraction, note) {
 }
 
 function guestLinks(net) {
-  // guest -> "tap1 → br0", from the host network report
-  const out = {};
+  // guest -> ["tap1 → br0"], from the host network report. A Map, since a
+  // guest may be called "constructor".
+  const out = new Map();
+  const add = (g, text) => { if (!out.has(g)) out.set(g, []); out.get(g).push(text); };
   for (const br of (net && net.bridges) || []) {
-    for (const m of br.members) for (const g of m.guests) (out[g] ||= []).push(`${m.name} → ${br.name}`);
+    for (const m of br.members) for (const g of m.guests) add(g, `${m.name} → ${br.name}`);
   }
   for (const [g, rep] of Object.entries((net && net.guests) || {})) {
-    for (const n of rep.nics) if (!n.bridge) (out[g] ||= []).push(n.host_if);
+    for (const n of rep.nics) if (!n.bridge) add(g, n.host_if);
   }
   return out;
 }
@@ -62,7 +65,8 @@ export function hostView(tab, store) {
     h("div", { class: "titlebar" }, h("h1", { text: `Host ${host.hostname}` }),
       h("span", { class: "muted", text: `${host.cpus} CPUs · ${bytes(host.mem_total_bytes)} · up ${longUptime(host.uptime)}` })),
     h("div", { class: "tabs", role: "tablist" },
-      [["summary", "Summary", "#/"], ["network", "Network", "#/host/network"]].map(([id, label, href]) =>
+      [["summary", "Summary", "#/"], ["network", "Network", "#/host/network"],
+        ["tasks", "Tasks", "#/host/tasks"]].map(([id, label, href]) =>
         h("a", { class: "tab", role: "tab", href, "aria-selected": String(tab === id), text: label }))),
     body);
 
@@ -92,7 +96,7 @@ export function hostView(tab, store) {
         h("td", { text: r.os }), h("td", { class: "muted", text: r.emulator }),
         h("td", {}, stateBadge(r)), h("td", { class: "mono", text: uptime(r.uptime) }),
         h("td", { class: "num", text: pct(r.cpu_pct) }), h("td", { class: "num", text: bytes(r.mem_bytes) }),
-        h("td", { class: "mono muted", text: (links[r.name] || []).join(", ") || "—" })))));
+        h("td", { class: "mono muted", text: (links.get(r.name) || []).join(", ") || "—" })))));
     return [
       h("div", { class: "stats" }, cards),
       h("section", { class: "card flush" }, h("h2", { text: "Guests" }),
@@ -123,23 +127,33 @@ export function hostView(tab, store) {
     ];
   }
 
+  function tasks() {
+    return [h("section", { class: "card flush" }, h("h2", {}, "Tasks ",
+      h("span", { class: "muted", text: "the last 200; every one is also in the daemon's task log" })),
+    taskTable(store.tasks))];
+  }
+
   function render() {
-    clear(body).append(...(tab === "network" ? network() : summary()));
+    clear(body).append(...(tab === "network" ? network() : tab === "tasks" ? tasks() : summary()));
   }
 
   async function loadNet() {
-    try { net = await get("/api/host/network"); } catch (e) { net = { bridges: [], guests: {}, warnings: [`could not read the network: ${e.message}`] }; }
+    try { net = await poll("/api/host/network"); } catch (e) { net = { bridges: [], guests: {}, warnings: [`could not read the network: ${e.message}`] }; }
     render();
   }
 
   async function refreshHost() {
-    try { Object.assign(host, await get("/api/host")); } catch (e) { /* keep the last */ }
+    try { Object.assign(host, await poll("/api/host")); } catch (e) { /* keep the last */ }
   }
 
   const onRows = async () => { if (tab === "summary") { await refreshHost(); render(); } };
+  const onTasks = () => { if (tab === "tasks") render(); };
   store.listeners.add(onRows);
+  store.taskListeners.add(onTasks);
   render();
-  loadNet();
-  netTimer = setInterval(loadNet, NET_EVERY);
-  return { el, close() { store.listeners.delete(onRows); clearInterval(netTimer); } };
+  if (tab !== "tasks") {
+    loadNet();
+    netTimer = setInterval(loadNet, NET_EVERY);
+  }
+  return { el, close() { store.listeners.delete(onRows); store.taskListeners.delete(onTasks); clearInterval(netTimer); } };
 }

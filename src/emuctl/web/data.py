@@ -129,6 +129,15 @@ def guest_detail(settings, name, row):
         start_ok, start_why = start.allowed, start.message
     except Exception as exc:                    # never let the guard break the page
         start_ok, start_why = False, f"could not check: {exc}"
+    stops = {}
+    for mode in actions.STOP_MODES:
+        try:
+            p = actions.plan_stop(settings, name, mode, cfg)
+            stops[mode] = {"allowed": p.allowed and bool(p.steps), "message": p.message,
+                           "power_cut": p.power_cut}
+        except Exception as exc:
+            stops[mode] = {"allowed": False, "message": f"could not check: {exc}",
+                           "power_cut": False}
     out.update({
         "kind": cfg.kind,
         "workdir": cfg.workdir,
@@ -143,6 +152,7 @@ def guest_detail(settings, name, row):
         "guest_addr": cfg.guest_addr,
         "nics": cfg.nics,
         "notes": bool(cfg.notes),
+        "stop": stops,
         "can_start": start_ok,
         "start_refused": "" if start_ok else start_why,
         "boot_timeout": cfg.boot_timeout,
@@ -151,22 +161,39 @@ def guest_detail(settings, name, row):
 
 
 def guest_hardware(cfg):
-    hw = hardware.describe(cfg)
+    def careful_read(path):
+        if not safe_path(path):
+            raise OSError(0, "not shown: a protected file")
+        return hardware.read_config(path)
+    hw = hardware.describe(cfg, read=careful_read)
     raw = []
     for path in hw.get("sources", []):
-        text = hardware.read_config(path)
-        if text is not None and safe_path(path):
-            raw.append({"path": path, "text": text})
+        if path == "command":
+            continue
+        try:
+            raw.append({"path": path, "text": careful_read(path)})
+        except OSError:
+            pass
     hw["raw"] = raw
     return hw
 
 
+# Files no route may show, even through a symlink: the env directory, where
+# guests' passwords live, plus the daemon's own key, users file and state
+# (app.make_app adds those).
+PROTECTED = [ENV_DIR]
+
+
+def _inside(real, top):
+    top = os.path.realpath(top)
+    return real == top or real.startswith(top.rstrip(os.sep) + os.sep)
+
+
 def safe_path(path):
-    """False for anything under the env directory, where passwords live,
+    """False for a protected file or anything under a protected directory,
     after following symlinks."""
     real = os.path.realpath(path)
-    env = os.path.realpath(ENV_DIR)
-    return not (real == env or real.startswith(env + os.sep))
+    return not any(_inside(real, p) for p in PROTECTED)
 
 
 def clean_text(data):
@@ -174,18 +201,30 @@ def clean_text(data):
         .decode("utf-8", "replace")
 
 
-def tail_bytes(path, limit=LOG_TAIL_BYTES):
-    """The last `limit` bytes of a regular file, or None."""
-    if not safe_path(path):
+def tail_bytes(path, limit=LOG_TAIL_BYTES, within=None):
+    """The last `limit` bytes of a regular file, or None.
+
+    With `within`, the file must really be inside that directory: the last
+    part of the path may not be a symlink, and the file opened must be the
+    one the checks looked at.
+    """
+    real = os.path.realpath(path)
+    if not safe_path(path) or (within and not _inside(real, within)):
         return None
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | (os.O_NOFOLLOW if within else 0))
     except OSError:
         return None
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
             return None
+        try:
+            again = os.stat(real)
+        except OSError:
+            return None
+        if (st.st_dev, st.st_ino) != (again.st_dev, again.st_ino):
+            return None                         # swapped between the check and the open
         os.lseek(fd, max(0, st.st_size - limit), os.SEEK_SET)
         chunks, left = [], limit
         while left > 0:
@@ -204,16 +243,41 @@ def console_log_path(cfg):
 
 
 def console_log(cfg, lines):
-    data = tail_bytes(console_log_path(cfg))
+    data = tail_bytes(console_log_path(cfg), within=cfg.workdir)
     if data is None:
         return None
     return "\n".join(clean_text(data).rstrip("\n").split("\n")[-lines:])
 
 
+MAX_JOURNAL = 4 * 1024 * 1024
+
+
 def supervisor_log(settings, name, lines, run=None):
+    """The supervisor's log, read with a cap on how much is held at once."""
     argv = service.log_argv(settings, name, lines)
+    if run:                                     # tests
+        try:
+            r = run(argv, capture_output=True, timeout=15)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"could not read the log: {exc}"
+        return clean_text((r.stdout or b"")[-LOG_TAIL_BYTES:])
     try:
-        r = (run or subprocess.run)(argv, capture_output=True, timeout=15)
-    except (OSError, subprocess.SubprocessError) as exc:
+        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL)
+    except OSError as exc:
         return f"could not read the log: {exc}"
-    return clean_text((r.stdout or b"")[-LOG_TAIL_BYTES:] + (r.stderr or b"")[-4096:])
+    buf, total = bytearray(), 0
+    try:
+        while True:
+            chunk = proc.stdout.read(65536)
+            if not chunk:
+                break
+            total += len(chunk)
+            buf += chunk
+            del buf[:-LOG_TAIL_BYTES]
+            if total > MAX_JOURNAL:
+                break
+    finally:
+        proc.kill()
+        proc.wait()
+    return clean_text(bytes(buf))

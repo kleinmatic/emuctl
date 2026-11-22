@@ -5,6 +5,7 @@ Every key is optional. The file has the same `key = value` format as
 emuctl.conf. EMUCTL_WEB_CONF names another file.
 """
 import os
+import re
 from dataclasses import dataclass
 
 from ..settings import ETC
@@ -12,7 +13,10 @@ from ..settings import ETC
 DEFAULT_PATH = os.path.join(ETC, "web.conf")
 # systemd's StateDirectory=emuctl-web makes this, owned by the daemon's account.
 STATE_DIR = "/var/lib/emuctl-web"
-KEYS = ("listen", "port", "tls", "tls_cert", "tls_key", "state_dir", "users_file", "task_log")
+# Root's, readable by the daemon's group: the daemon cannot add users to it.
+USERS_FILE = os.path.join(ETC, "web-users")
+KEYS = ("listen", "port", "tls", "tls_cert", "tls_key", "state_dir", "users_file", "task_log",
+        "server_names")
 
 
 class WebConfError(Exception):
@@ -27,8 +31,9 @@ class WebConf:
     tls_cert: str = ""          # empty: a self-signed one in state_dir, made on first start
     tls_key: str = ""
     state_dir: str = STATE_DIR
-    users_file: str = ""        # empty: state_dir/users
+    users_file: str = USERS_FILE
     task_log: str = "/var/log/emuctl/web-tasks.log"
+    server_names: tuple = ()    # host names the page may be reached by, beyond the host's own
 
     @property
     def self_signed(self):
@@ -44,7 +49,7 @@ class WebConf:
 
     @property
     def users_path(self):
-        return self.users_file or os.path.join(self.state_dir, "users")
+        return self.users_file or USERS_FILE
 
 
 def parse_web_conf(text, where="web.conf"):
@@ -69,6 +74,12 @@ def parse_web_conf(text, where="web.conf"):
             if v.lower() not in ("on", "off", "yes", "no", "true", "false"):
                 raise WebConfError(f"{where}: tls must be on or off, got {v!r}")
             out[k] = v.lower() in ("on", "yes", "true")
+        elif k == "server_names":
+            names = tuple(n.strip().lower() for n in v.split(",") if n.strip())
+            for n in names:
+                if not re.fullmatch(r"[a-z0-9.-]+", n):
+                    raise WebConfError(f"{where}: server_names: not a host name: {n!r}")
+            out[k] = names
         elif k in ("tls_cert", "tls_key", "state_dir", "users_file", "task_log"):
             if v and not os.path.isabs(v):
                 raise WebConfError(f"{where}: {k} must be an absolute path")

@@ -4,8 +4,10 @@
 # through the polkit rule in examples/polkit/, and reads guest workdirs
 # through group membership the admin grants (docs/web.md says which).
 #
-# Settings: /etc/emuctl/web.conf. Certificate, key and users file: in
-# /var/lib/emuctl-web unless web.conf names other places.
+# Settings: /etc/emuctl/web.conf. Users: /etc/emuctl/web-users (root's; the
+# daemon can read it, not change it). Certificate and key: /var/lib/emuctl-web.
+# ProtectProc is left off on purpose: the daemon must see the guests' processes
+# to tell a running guest from a stale state file.
 [Unit]
 Description=emuctl web interface
 Documentation=https://github.com/kleinmatic/emuctl/blob/main/docs/web.md
@@ -38,7 +40,16 @@ ProtectHostname=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
+ProtectKernelLogs=yes
+RestrictNamespaces=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
 CapabilityBoundingSet=
+# Bounds, so a flood of connections or a runaway cannot take the host with it.
+LimitNOFILE=8192
+TasksMax=256
+MemoryMax=1G
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 UMask=0077
 

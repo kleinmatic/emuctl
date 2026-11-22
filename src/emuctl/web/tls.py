@@ -35,6 +35,10 @@ def make_self_signed(cert, key, hostname=None, run=subprocess.run):
         r = run(["openssl", "req", "-x509", "-newkey", "ec",
                  "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-days", "3650",
                  "-subj", f"/CN={hostname}", "-addext", f"subjectAltName={san}",
+                 # A server certificate only: never a CA, even if someone trusts it.
+                 "-addext", "basicConstraints=critical,CA:FALSE",
+                 "-addext", "keyUsage=critical,digitalSignature",
+                 "-addext", "extendedKeyUsage=serverAuth",
                  "-keyout", tmp_key, "-out", tmp_cert],
                 capture_output=True, text=True, timeout=60)
     finally:
