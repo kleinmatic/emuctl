@@ -1,5 +1,7 @@
 # Changelog
 
+## Unreleased
+
 ## 0.2.0 (2026-11-22)
 
 - `emuctl start` no longer reports `crashed` straight away when the previous
