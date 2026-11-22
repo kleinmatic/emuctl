@@ -16,7 +16,7 @@ optional for changes under `src/emuctl/web/`.
 
    | # | Question |
    |---|---|
-   | 1 | Can the daemon end up listening on a non-loopback address without TLS? |
+   | 1 | Can the daemon end up serving plain HTTP without `tls = off` being set explicitly? Does TLS-off still drop `Secure` and warn? |
    | 2 | Can any new route be reached without a session? Are cookie flags intact? |
    | 3 | Does every new state-changing request and WebSocket check Origin, and every POST the CSRF token? |
    | 4 | Does every guest name from a URL or body go through the shared lookup before use? |

@@ -110,8 +110,10 @@ files are read only if they are regular files of bounded size
 Once `src/emuctl/web/` exists, every change to it follows these. A console is
 a root login on many guests, so the page is as powerful as root.
 
-1. The default listen address is `127.0.0.1`. Any other address needs TLS, or
-   the daemon refuses to start.
+1. The daemon listens on port 8600 on all addresses by default and serves
+   HTTPS, with a self-signed certificate it makes on first start unless the
+   admin names one. Plain HTTP only when `tls = off` is set explicitly; then
+   the session cookie loses `Secure` and the daemon logs a warning.
 2. Every request except the login page needs a session: a random 256-bit
    token in a cookie marked `HttpOnly`, `Secure` and `SameSite=Strict`, kept
    in memory, expiring after 12 hours idle.
