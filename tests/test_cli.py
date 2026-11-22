@@ -57,7 +57,7 @@ def test_status_of_a_guest_that_is_not_running(settings, tmp_path):
     add_guest(settings, tmp_path)
     row = guest_status(settings, "g1")
     assert (row["state"], row["node"], row["uptime"]) == ("down", "MINI", None)
-    assert "MINI" in format_table([row]) and "EMULATOR" not in format_table([row])
+    assert "MINI" not in format_table([row]) and "MINI" in format_table([row], node=True)
 
 
 def test_ready_guest_whose_address_is_silent_is_degraded(settings, tmp_path):

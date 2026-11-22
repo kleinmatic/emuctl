@@ -67,35 +67,37 @@ def guest_status(settings, name, probe=probe_guest):
     return row
 
 
-USAGE_WIDTH = 80
+WIDTH = 80
 
 
-def _columns(head, table, always):
-    # Drop columns nobody filled in (os and emulator are optional labels).
-    keep = [i for i in range(len(head))
-            if i in always or any(row[i] not in ("", "-") for row in table[1:])]
-    widths = [max(len(row[i]) for row in table) for i in keep]
-    return ["  ".join(row[i].ljust(w) for i, w in zip(keep, widths)).rstrip() for row in table]
+def format_table(rows, usage=False, node=False, os=False, emulator=False):
+    """The `emuctl list` table.
 
-
-def format_table(rows, usage=False):
-    uptimes = [uptime_str(r["uptime"]) if r["uptime"] is not None else "-" for r in rows]
-    if not usage:
-        head = ("GUEST", "NODE", "OS", "EMULATOR", "STATE", "UPTIME", "DETAIL")
-        table = [head] + [(r["name"], r["node"], r["os"], r["emulator"], r["state"], up,
-                           r["detail"]) for r, up in zip(rows, uptimes)]
-        return "\n".join(_columns(head, table, always=(0, 4)))
-    # --usage: the labels plain `list` shows (node, os, emulator) make way for
-    # the numbers, and the line stops at 80 columns; DETAIL is cut to fit.
+    By default: guest, state, uptime and detail, kept within 80 columns by
+    cutting DETAIL short. --usage adds CPU% and MEM and still fits. The label
+    columns (--node, --os, --emulator) are asked for by name, so with any of
+    them the line is allowed to run past 80.
+    """
     from .usage import human_bytes
-    head = ("GUEST", "STATE", "UPTIME", "CPU%", "MEM", "DETAIL")
-    table = [head] + [(r["name"], r["state"], up,
-                       "-" if r.get("cpu_pct") is None else f"{r['cpu_pct']:.1f}",
-                       human_bytes(r.get("mem_bytes")), r["detail"])
-                      for r, up in zip(rows, uptimes)]
-    lines = _columns(head, table, always=(0, 1, 2, 3, 4))
-    return "\n".join(line if len(line) <= USAGE_WIDTH else line[:USAGE_WIDTH - 1] + "…"
-                     for line in lines)
+    cols = [("GUEST", lambda r: r["name"])]
+    if node:
+        cols.append(("NODE", lambda r: r["node"]))
+    if os:
+        cols.append(("OS", lambda r: r["os"]))
+    if emulator:
+        cols.append(("EMULATOR", lambda r: r["emulator"]))
+    cols += [("STATE", lambda r: r["state"]),
+             ("UPTIME", lambda r: uptime_str(r["uptime"]) if r["uptime"] is not None else "-")]
+    if usage:
+        cols += [("CPU%", lambda r: "-" if r.get("cpu_pct") is None else f"{r['cpu_pct']:.1f}"),
+                 ("MEM", lambda r: human_bytes(r.get("mem_bytes")))]
+    cols.append(("DETAIL", lambda r: r["detail"] or ""))
+    table = [[h for h, _ in cols]] + [[str(get(r) or "") for _, get in cols] for r in rows]
+    widths = [max(len(row[i]) for row in table) for i in range(len(cols))]
+    lines = ["  ".join(c.ljust(w) for c, w in zip(row, widths)).rstrip() for row in table]
+    if node or os or emulator:
+        return "\n".join(lines)
+    return "\n".join(line if len(line) <= WIDTH else line[:WIDTH - 1] + "…" for line in lines)
 
 
 def format_info(settings, name, probe=probe_guest):

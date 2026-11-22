@@ -14,8 +14,9 @@ ultrix-vax  ready  2d04h    3.1    61.0M
 tru64       down   -        -      -
 ```
 
-To fit 80 columns, `--usage` leaves out the NODE, OS and EMULATOR columns
-that plain `emuctl list` shows, and cuts DETAIL short if it has to.
+`emuctl list` and `emuctl list --usage` fit in 80 columns, cutting DETAIL
+short if they have to. `--node`, `--os` and `--emulator` add those labels;
+with any of them the lines may run longer. `--json` always has every field.
 
 | Field (`--json`) | Column | Meaning | Source |
 |---|---|---|---|

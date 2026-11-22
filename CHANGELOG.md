@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `emuctl list` shows GUEST, STATE, UPTIME and DETAIL and fits in 80 columns.
+  `--node`, `--os` and `--emulator` add those columns back; `--usage` adds
+  CPU% and MEM. `--json` is unchanged.
+
 ## 0.2.0 (2026-11-22)
 
 - `emuctl start` no longer reports `crashed` straight away when the previous

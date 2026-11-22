@@ -5,11 +5,11 @@ QEMU, and other emulators that put their console on a TCP port.
 
 ```
 $ emuctl list
-GUEST    NODE     OS                STATE    UPTIME   DETAIL
-pdp11    pdp11    2.11BSD           ready    3d04h    192.0.2.21 answers
-vax      VAXA     OpenVMS VAX 7.3   stuck    0:02:10  boot is waiting at: enter date and time
-alpha    alpha    Tru64 5.1B        halted   8:12:44  guest OS is down; safe to stop
-aix      aix      AIX 5.1           down
+GUEST  STATE   UPTIME   DETAIL
+pdp11  ready   3d04h    192.0.2.21 answers
+vax    stuck   0:02:10  boot is waiting at: enter date and time
+alpha  halted  8:12:44  guest OS is down; safe to stop
+aix    down    -
 
 $ emuctl start pdp11 --wait
 $ emuctl console vax

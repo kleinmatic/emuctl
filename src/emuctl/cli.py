@@ -67,7 +67,8 @@ def cmd_list(settings, args):
     if args.json:
         print(json.dumps(rows, indent=2))
     elif rows:
-        print(format_table(rows, usage=args.usage))
+        print(format_table(rows, usage=args.usage, node=args.node, os=args.os,
+                           emulator=args.emulator))
     else:
         print(f"no guests configured in {settings.guest_dir}")
     return 0
@@ -387,6 +388,9 @@ def build_parser():
     s.add_argument("--json", action="store_true")
     s.add_argument("--usage", action="store_true",
                    help="add CPU and memory use (takes a one-second sample)")
+    s.add_argument("--node", action="store_true", help="add the machine's own name")
+    s.add_argument("--os", action="store_true", help="add the OS label")
+    s.add_argument("--emulator", action="store_true", help="add the emulator label")
     s.set_defaults(func=cmd_list)
 
     s = sub.add_parser("info", help="how to reach a guest and where its files live")
