@@ -59,6 +59,10 @@ would. If a change needs another verb, add it to `tools/devhost` and to
 tools/devhost down          # stops every guest it started, deletes the directory
 ```
 
+`down` (and `env`) act on the devhost named by this shell's exports
+(`EMUCTL_DEVHOST`), else on the default directory. From a shell without the
+exports, name it: `tools/devhost down /some/dir`.
+
 If a shell was closed with guests running, `down` still finds and stops them
 through their pid files.
 

@@ -36,12 +36,18 @@ of this file and the skills that mention it.
 
 ## Running things
 
+pytest, pytest-cov and ruff are the only tools needed. Install them with
+`python3 -m pip install pytest pytest-cov ruff`, or run them without
+installing through uv: `uvx --with pytest --with pytest-cov pytest ...` and
+`uvx ruff ...`.
+
 ```sh
 python3 -m pytest -q                              # all tests, no root, no emulator
-python3 -m pytest -q --cov=emuctl --cov-report=json && python3 tools/coverage_check.py
+python3 -m pytest -q --cov=emuctl --cov-report=json   # writes coverage.json ...
+python3 tools/coverage_check.py                       # ... which this reads
 ruff check src tests tools tools/devhost
 eval "$(tools/devhost up)"                        # then: emuctl list, start, console, stop
-tools/devhost down
+tools/devhost down                                # the devhost this shell set up
 ```
 
 The full suite takes under a minute. The end-to-end tests start real

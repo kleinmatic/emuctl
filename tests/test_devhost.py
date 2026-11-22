@@ -88,3 +88,11 @@ def test_down_removes_everything(tmp_path):
     subprocess.run([sys.executable, DEVHOST, "down", d], check=True, capture_output=True,
                    env=env)
     assert not os.path.exists(d)
+
+
+def test_down_uses_the_shells_devhost(tmp_path):
+    """`down` with no directory acts on the devhost the exports name."""
+    d = str(tmp_path / "custom")
+    env = devhost_env(d)
+    subprocess.run([sys.executable, DEVHOST, "down"], check=True, capture_output=True, env=env)
+    assert not os.path.exists(d)

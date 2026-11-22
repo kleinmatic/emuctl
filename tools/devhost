@@ -8,6 +8,7 @@
     emuctl console vax               Ctrl-] detaches
     emuctl stop vax
     tools/devhost down               stop every guest and delete the directory
+                                     (the one this shell's exports name, else the default)
 
 Needs no root and no emulator. The guests run tests/fake_emulator.py. The
 `systemctl` and `journalctl` on the printed PATH are this script under other
@@ -262,7 +263,12 @@ def main(argv):
     if len(argv) < 2 or argv[1] not in ("up", "down", "env"):
         sys.stderr.write(__doc__)
         return 2
-    d = os.path.abspath(argv[2]) if len(argv) > 2 else default_dir()
+    if len(argv) > 2:
+        d = os.path.abspath(argv[2])
+    elif argv[1] != "up" and os.environ.get("EMUCTL_DEVHOST"):
+        d = os.environ["EMUCTL_DEVHOST"]    # the devhost this shell was set up for
+    else:
+        d = default_dir()
     if argv[1] == "up":
         return cmd_up(d)
     if argv[1] == "down":
