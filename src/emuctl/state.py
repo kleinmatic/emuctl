@@ -83,3 +83,14 @@ def effective_state(state, alive=proc_alive, matches=proc_matches):
     if sup and not alive(sup):
         return "orphaned"               # emulator alive, nothing owns it
     return recorded if recorded in STATES else "down"
+
+
+def supervisor_matches(pid, name):
+    """True if `pid` is the supervisor for guest `name`, not a recycled pid."""
+    try:
+        out = subprocess.run(["ps", "-o", "command=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=5).stdout.split()
+    except Exception:
+        return False
+    return any(w == "supervise" and i + 1 < len(out) and out[i + 1] == name
+               for i, w in enumerate(out))

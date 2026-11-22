@@ -15,9 +15,10 @@ from emuctl.state import write_state
 BOOT = "boot.1 = >>> | boot\n"
 
 
-def set_state(settings, name, state):
+def set_state(settings, name, state, **extra):
+    extra.setdefault("stop_now", True)
     write_state(settings.run_dir, name, state=state, pid=os.getpid(),
-                supervisor_pid=os.getpid(), cmd="", started_at=0)
+                supervisor_pid=os.getpid(), cmd="", started_at=0, **extra)
 
 
 # --- plan_start -------------------------------------------------------------
@@ -99,14 +100,51 @@ def test_stop_now_on_a_down_guest_only_stops(settings, tmp_path):
     assert plan.steps == [service.stop_argv(settings, "g1")] and not plan.power_cut
 
 
-def test_stop_now_under_rcd_uses_the_supervisor_pid(settings, tmp_path):
+def test_stop_now_on_an_old_supervisor_sends_term(settings, tmp_path):
+    # A supervisor from before 0.2 has no SIGUSR2 handler and would die of it.
+    add_guest(settings, tmp_path)
+    write_state(settings.run_dir, "g1", state="ready", pid=os.getpid(),
+                supervisor_pid=os.getpid(), cmd="", started_at=0)
+    kill, _ = actions.plan_stop(settings, "g1", "now").steps
+    assert kill[-2:] == ["TERM", "emuctl-guest@g1.service"]
+
+
+def test_stop_now_under_rcd_checks_the_supervisor_pid(settings, tmp_path):
     rcd = dataclasses.replace(settings, service="rcd")
     add_guest(rcd, tmp_path)
-    write_state(rcd.run_dir, "g1", state="ready", pid=os.getpid(), supervisor_pid=4242,
-                cmd="", started_at=0)
-    kill, _ = actions.plan_stop(rcd, "g1", "now").steps
-    assert kill[-2:] == ["-USR2", "4242"]
+    write_state(rcd.run_dir, "g1", state="ready", pid=os.getpid(), supervisor_pid=os.getpid(),
+                cmd="", started_at=0, stop_now=True)
+    kill, _ = actions.plan_stop(rcd, "g1", "now", matches=lambda pid, n: True).steps
+    assert kill[-2:] == ["-USR2", str(os.getpid())]
+    # A recycled pid, or none at all: nothing is signalled and nothing stopped.
+    plan = actions.plan_stop(rcd, "g1", "now", matches=lambda pid, n: False)
+    assert not plan.allowed and plan.code == 1 and plan.steps == []
     assert service.kill_argv(rcd, "g1", "USR2", pid=None) is None
+
+
+def test_stop_now_on_an_orphan_is_refused(settings, tmp_path):
+    add_guest(settings, tmp_path)
+    set_state(settings, "g1", "ready")
+    write_state(settings.run_dir, "g1", state="ready", pid=os.getpid(),
+                supervisor_pid=999999999, cmd="", started_at=0, stop_now=True)
+    plan = actions.plan_stop(settings, "g1", "now")
+    assert plan.state == "orphaned" and not plan.allowed
+
+
+def test_freeze_while_starting_is_a_power_cut(settings, tmp_path):
+    # Before the console answers, the supervisor cannot freeze; it terminates.
+    add_guest(settings, tmp_path, extra="stop_mode = freeze")
+    set_state(settings, "g1", "starting")
+    assert actions.plan_stop(settings, "g1", "now").power_cut is True
+
+
+def test_a_second_plain_stop_while_stopping_does_nothing(settings, tmp_path):
+    add_guest(settings, tmp_path, extra="stop.1 = login: | shutdown")
+    set_state(settings, "g1", "stopping")
+    for mode in ("clean", "force"):
+        plan = actions.plan_stop(settings, "g1", mode)
+        assert not plan.allowed and plan.code == 0 and "--now" in plan.message
+    assert actions.plan_stop(settings, "g1", "now").allowed
 
 
 def test_bad_mode(settings, tmp_path):
@@ -136,14 +174,25 @@ def test_cli_stop_now(settings, tmp_path, monkeypatch, capsys):
     assert "power cut" in capsys.readouterr().err
 
 
-def test_cli_stop_now_carries_on_when_the_signal_fails(settings, tmp_path, monkeypatch, capsys):
-    add_guest(settings, tmp_path)
+def test_cli_stop_now_stops_nothing_when_the_signal_fails(settings, tmp_path, monkeypatch,
+                                                          capsys):
+    add_guest(settings, tmp_path, extra="stop.1 = login: | shutdown")
     set_state(settings, "g1", "ready")
     monkeypatch.setattr(cli, "load_settings", lambda: settings)
-    rcs = iter([1, 0])
-    monkeypatch.setattr(cli, "run", lambda argv: next(rcs))
-    assert cli.main(["stop", "g1", "--now"]) == 0
-    assert "stopping normally" in capsys.readouterr().err
+    called = []
+    monkeypatch.setattr(cli, "run", lambda argv: called.append(argv) or 1)
+    assert cli.main(["stop", "g1", "--now"]) == 1
+    assert len(called) == 1                 # the stop after the failed signal never ran
+    assert "nothing was stopped" in capsys.readouterr().err
+
+
+def test_cli_second_stop_while_stopping(settings, tmp_path, monkeypatch, capsys):
+    add_guest(settings, tmp_path, extra="stop.1 = login: | shutdown")
+    set_state(settings, "g1", "stopping")
+    monkeypatch.setattr(cli, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli, "run", lambda argv: 1 / 0)
+    assert cli.main(["stop", "g1"]) == 0
+    assert "already stopping" in capsys.readouterr().out
 
 
 def test_cli_start_failure_from_the_service_manager(settings, tmp_path, monkeypatch, capsys):
@@ -196,6 +245,35 @@ def test_stop_now_abandons_a_stop_command(guest, tmp_path, capsys):
     g.thread.join(15)
     assert not g.thread.is_alive()
     assert "abandoning stop_command" in capsys.readouterr().out
+
+
+def test_stop_now_when_pump_gives_up_still_stops_the_emulator(guest):
+    # A console reattach abandoned by stop-now makes pump() return False with
+    # the emulator still running. The supervisor must stop it, not hang.
+    g = guest(extra=BOOT).start()
+    g.wait_state("ready")
+
+    def gone():
+        g.sup.stop_requests = 2
+        return False
+    g.sup.pump = gone
+    g.thread.join(15)
+    assert not g.thread.is_alive() and g.sup.proc.poll() is not None
+    assert g.state() == "down"
+
+
+def test_state_records_stop_now_support(guest, settings):
+    g = guest(extra=BOOT).start()
+    g.wait_state("ready")
+    from emuctl.state import read_state
+    assert read_state(settings.run_dir, g.name)["stop_now"] is True
+    g.stop()
+
+
+def test_supervisor_matches_checks_the_command_line():
+    from emuctl.state import supervisor_matches
+    assert not supervisor_matches(os.getpid(), "g1")       # pytest, not a supervisor
+    assert not supervisor_matches(999999999, "g1")
 
 
 def test_main_installs_the_usr2_handler(monkeypatch, settings, tmp_path):

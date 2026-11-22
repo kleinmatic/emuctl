@@ -145,18 +145,21 @@ def cmd_stop(settings, args):
     mode = "now" if args.now else "force" if args.force else "clean"
     plan = actions.plan_stop(settings, args.guest, mode, cfg)
     if plan.message:
-        sys.stderr.write(f"emuctl: {plan.message}\n")
-    if not plan.allowed:
+        out = sys.stderr if (plan.code or plan.power_cut) else sys.stdout
+        out.write(f"emuctl: {plan.message}\n" if out is sys.stderr else f"{plan.message}\n")
+    if not plan.allowed and plan.power_cut:
         sys.stderr.write("        Shut it down from inside, or repeat with --force.\n")
+    if not plan.allowed:
         return plan.code
     rc = 0
     for i, argv in enumerate(plan.steps):
         rc = run(argv)
         if rc != 0 and i < len(plan.steps) - 1:
-            # The signal for --now failed; the stop below still stops the guest,
-            # it just shuts the guest down first if the conf says how.
-            sys.stderr.write("emuctl: could not tell the supervisor to skip the shutdown; "
-                             "stopping normally\n")
+            # --now's signal failed. Going on would run the full shutdown the
+            # user asked to skip, so stop here and say so.
+            sys.stderr.write(f"emuctl: could not signal {args.guest}'s supervisor; nothing was "
+                             f"stopped. `emuctl stop {args.guest}` stops it normally.\n")
+            return rc
     return rc
 
 

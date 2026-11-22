@@ -99,9 +99,19 @@ machine is still saved, so nothing is lost.
 You can run it while a normal `emuctl stop` is still waiting, from another
 terminal. The supervisor log says which step it abandoned.
 
+A plain `emuctl stop` on a guest that is already stopping does nothing and
+points you at `--now`.
+
+If emuctl cannot signal the supervisor (no permission, or under rc.d no
+running supervisor matches the pid in the state file), it stops nothing and
+says so. It does not fall back to a normal stop, because that would run the
+shutdown you asked to skip.
+
 How it works: `emuctl` sends SIGUSR2 to the supervisor (on systemd,
-`systemctl kill --kill-whom=main -s USR2`), then runs the usual stop. A second
-SIGTERM to the supervisor has the same effect.
+`systemctl kill --kill-whom=main -s USR2`, which needs systemd 252 or newer),
+then runs the usual stop. A supervisor started by an emuctl older than 0.2 is
+sent SIGTERM instead, which together with the stop's own SIGTERM has the same
+effect. A second SIGTERM to any supervisor has the same effect.
 
 ## Timeouts in the service manager
 

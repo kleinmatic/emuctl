@@ -150,7 +150,7 @@ class Supervisor:
                     pid=(self.proc.pid if self.proc and state != "down" else None),
                     cmd=" ".join(self.cfg.command), supervisor_pid=os.getpid(),
                     node=self.cfg.node, broker=self.cfg.broker,
-                    started_at=self.started_at, **extra)
+                    started_at=self.started_at, stop_now=True, **extra)
 
     def running(self):
         return self.proc.poll() is None
@@ -624,6 +624,10 @@ class Supervisor:
                     break
                 if not self.pump():
                     break
+            if self.running() and self.stop_requests:
+                # pump() gave up (a console reattach abandoned by stop-now)
+                # with the emulator still up: stop it rather than wait forever.
+                self.shutdown()
             self.proc.wait()
             self.finalize()
             return 0

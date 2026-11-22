@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 from . import guard, service
 from .config import load_config
-from .state import effective_state, read_state
+from .state import effective_state, read_state, supervisor_matches
 
 STOP_MODES = ("clean", "force", "now")
 RUNNING = ("ready", "booting", "stuck", "starting", "orphaned", "stopping")
@@ -39,7 +39,23 @@ def plan_start(settings, name, cfg=None):
     return Plan(True, steps=[service.start_argv(settings, name)], state=state)
 
 
-def plan_stop(settings, name, mode="clean", cfg=None):
+def _stop_now_signal(settings, name, raw, matches):
+    """The command that asks the supervisor to skip the shutdown, or None.
+
+    A supervisor from before emuctl 0.2 has no SIGUSR2 handler and would die
+    of the signal, so it gets a SIGTERM instead: with the service manager's own
+    SIGTERM that follows, that is a second stop request, which old supervisors
+    also read as "skip the shutdown". Under rc.d the pid comes from the state
+    file and is checked first, so a recycled pid is never signalled.
+    """
+    sig = "USR2" if raw.get("stop_now") else "TERM"
+    pid = raw.get("supervisor_pid")
+    if settings.service != "systemd" and not (pid and matches(pid, name)):
+        return None
+    return service.kill_argv(settings, name, sig, pid=pid)
+
+
+def plan_stop(settings, name, mode="clean", cfg=None, matches=supervisor_matches):
     """mode: "clean" refuses a power cut, "force" accepts one, "now" asks for one.
 
     "now" skips the in-guest shutdown even when the conf has one, or ends one
@@ -55,14 +71,24 @@ def plan_stop(settings, name, mode="clean", cfg=None):
     stop = service.stop_argv(settings, name)
 
     if mode == "now":
-        cut = running and state != "halted" and cfg.stop_mode != "freeze"
+        # stop_mode = freeze saves the machine, but only once the console is up.
+        cut = running and (cfg.stop_mode != "freeze" or state == "starting")
         msg = (f"{name}: stop now skips the guest's own shutdown; for the guest it is a "
                f"power cut" if cut else "")
         if state in ("down", "crashed"):
-            return Plan(True, message=msg, power_cut=cut, steps=[stop], state=state)
-        kill = service.kill_argv(settings, name, "USR2", pid=(raw or {}).get("supervisor_pid"))
-        return Plan(True, message=msg, power_cut=cut,
-                    steps=([kill] if kill else []) + [stop], state=state)
+            return Plan(True, steps=[stop], state=state)
+        kill = _stop_now_signal(settings, name, raw or {}, matches)
+        if not kill or state == "orphaned":
+            return Plan(False, 1, f"cannot reach {name}'s supervisor to skip the shutdown; "
+                        f"nothing was stopped. `emuctl stop {name}` stops it normally.",
+                        state=state)
+        return Plan(True, message=msg, power_cut=cut, steps=[kill, stop], state=state)
+
+    if state == "stopping":
+        # A second plain stop would, under rc.d, send a second SIGTERM and cut
+        # the shutdown short. That is what --now is for; say so instead.
+        return Plan(False, 0, f"{name} is already stopping; `emuctl stop {name} --now` "
+                    f"cuts the shutdown short", state=state)
 
     clean = cfg.stop_mode == "freeze" or (state == "ready" and cfg.clean_stop)
     cut = state in CUT_STATES and not clean

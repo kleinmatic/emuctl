@@ -4,6 +4,9 @@
 reference system.** Other systemd distributions should work; problems on them
 are bugs worth reporting.
 
+systemd 252 or newer is needed for `emuctl stop --now` (Debian 12 has 252,
+Debian 13 has 257).
+
 Python 3.10 or newer is needed for the command and the supervisor. The web
 interface, when it arrives, will need Python 3.11 or newer and the `aiohttp`
 package (`python3-aiohttp` on Debian).
