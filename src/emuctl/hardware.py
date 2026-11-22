@@ -16,8 +16,14 @@ import json
 import os
 import re
 import shlex
+import stat
 
 TAPE_PREFIXES = ("tq", "ts", "tu", "tm", "mt", "ta")
+NIC_PREFIXES = ("xq", "xu", "ni", "ec")
+# `set <unit> <word>` words that are switches, not a drive model.
+SET_FLAGS = {"enable", "disable", "online", "offline", "enabled", "disabled", "writeenabled",
+             "locked", "write", "nowrite", "autosize", "noautosize", "debug", "nodebug",
+             "buffered", "nobuffer", "nonbuffered"}
 SIMH_MACHINES = {
     "vax": "MicroVAX 3900", "microvax3900": "MicroVAX 3900", "microvax3100": "MicroVAX 3100",
     "microvax2": "MicroVAX II", "microvax1": "MicroVAX I", "vax730": "VAX-11/730",
@@ -42,7 +48,7 @@ def mb(n):
 
 def size_to_mb(text):
     """'64m' -> 64, '1G' -> 1024, '192' -> 192 (QEMU's default unit is MB)."""
-    m = re.fullmatch(r"(\d+)\s*([kKmMgG]?)[bB]?", text.strip())
+    m = re.fullmatch(r"(\d{1,12})\s*([kKmMgG]?)[bB]?", text.strip())
     if not m:
         return None
     n, unit = int(m.group(1)), m.group(2).lower()
@@ -84,7 +90,7 @@ def parse_simh(text, program=None):
                     hw["machine"] = f"VAX {model}" if model.isdigit() else model
         elif verb in ("set", "se") and args:
             opts = ",".join(args).split(",")
-            if dev.startswith(("xq", "xu", "ni", "ec")) or any(
+            if dev.startswith(NIC_PREFIXES) or any(
                     o.lower().startswith("mac=") for o in opts):
                 nic = nics.setdefault(dev, {"unit": dev, "model": dev.upper(), "mac": None,
                                             "host_if": None})
@@ -96,7 +102,7 @@ def parse_simh(text, program=None):
                         nic["model"] = v.upper()
             elif re.fullmatch(r"[a-z]+\d+", dev):
                 first = opts[0].lower()
-                if first in ("enable", "disable", "online", "offline") or "=" in first:
+                if first in SET_FLAGS or "=" in first:
                     continue
                 d = disk(dev)
                 if first == "cdrom" or first.startswith(("rrd", "rrw")):
@@ -110,7 +116,10 @@ def parse_simh(text, program=None):
             if len(rest) < 2:
                 continue
             unit, target = rest[0].lower(), rest[1]
-            if target.lower().startswith(("tap:", "eth:", "vde:", "nat:", "udp:", "pcap:")):
+            if target.lower().startswith(("tap:", "eth:", "vde:", "nat:", "udp:", "pcap:")) \
+                    or unit.startswith(NIC_PREFIXES):
+                if ":" not in target:
+                    target = "eth:" + target            # attach xq eth0: a host NIC by name
                 nic = nics.setdefault(unit, {"unit": unit, "model": unit.upper(), "mac": None,
                                              "host_if": None})
                 scheme, _, name = target.partition(":")
@@ -133,40 +142,47 @@ def parse_simh(text, program=None):
 
 # --- es40 --------------------------------------------------------------------
 
+# A block body: no braces inside, and bounded so a malformed file cannot make
+# the regexes rescan to the end of the text for every opening brace.
+BODY = r"([^{}]{0,4000})"
+
+
 def _props(body):
     return {k: v.strip().strip('"') for k, v in re.findall(r"([\w.]+)\s*=\s*([^;]+);", body)}
 
 
 def parse_es40(text):
     hw = empty()
-    text = re.sub(r"//[^\n]*|#[^\n]*", "", text)
+    # Drop // and # comments, but not inside a quoted path ("/a//b#1.img").
+    text = re.sub(r'("[^"\n]*")|//[^\n]*|#[^\n]*', lambda m: m.group(1) or "", text)
     if re.search(r"=\s*tsunami\b", text):
         hw["machine"] = "AlphaServer ES40"
-    m = re.search(r"memory\.bits\s*=\s*(\d+)", text)
+    m = re.search(r"memory\.bits\s*=\s*(\d{1,3})\b", text)
     if m and 20 <= int(m.group(1)) <= 40:
         hw["memory"] = mb(2 ** int(m.group(1)) // (1024 * 1024))
-    cpus = re.findall(r"\bcpu\d+\s*=\s*(\w+)\s*(?:\{([^}]*)\})?", text)
+    cpus = re.findall(r"\bcpu\d{1,3}\s*=\s*(\w+)\s*(?:\{" + BODY + r"\})?", text)
     if cpus:
         model = cpus[0][0].upper()
         speed = _props(cpus[0][1] or "").get("speed", "")
-        sm = re.fullmatch(r"(\d+)\s*([MG])", speed.upper())
+        sm = re.fullmatch(r"(\d{1,6})\s*([MG])", speed.upper())
         mhz = (int(sm.group(1)) * (1000 if sm.group(2) == "G" else 1)) if sm else None
         hw["cpu"] = f"{len(cpus)} × {model}" + (f", {mhz} MHz" if mhz else "")
-    for unit, dtype, body in re.findall(r"\b(disk\d+\.\d+)\s*=\s*(\w+)\s*\{([^}]*)\}", text):
+    for unit, dtype, body in re.findall(r"\b(disk\d{1,3}\.\d{1,3})\s*=\s*(\w+)\s*\{" + BODY + r"\}",
+                                        text):
         p = _props(body)
         cdrom = p.get("cdrom", "").lower() == "true"
         hw["disks"].append({"unit": unit, "model": dtype, "file": p.get("file"),
                             "kind": "cdrom" if cdrom else "disk",
                             "readonly": cdrom or p.get("read_only", "").lower() == "true"})
-    for unit, model, body in re.findall(r"\b(pci\d+\.\d+)\s*=\s*(dec21143|e1000)\s*\{([^}]*)\}",
-                                        text):
+    for unit, model, body in re.findall(r"\b(pci\d{1,3}\.\d{1,3})\s*=\s*(dec21143|e1000)\s*\{"
+                                        + BODY + r"\}", text):
         p = _props(body)
         adapter = p.get("adapter")
         hw["nics"].append({"unit": unit,
                            "model": "DEC 21143" if model == "dec21143" else model.upper(),
                            "mac": p["mac"].lower().replace("-", ":") if p.get("mac") else None,
                            "host_if": os.path.basename(adapter) if adapter else None})
-    for unit, body in re.findall(r"\b(serial\d+)\s*=\s*serial\s*\{([^}]*)\}", text):
+    for unit, body in re.findall(r"\b(serial\d{1,3})\s*=\s*serial\s*\{" + BODY + r"\}", text):
         port = _props(body).get("port")
         if port:
             hw["other"].append(f"{unit} on port {port}")
@@ -191,7 +207,7 @@ def parse_qemu(argv):
     prog = os.path.basename(argv[0]) if argv else ""
     if prog.startswith("qemu-system-"):
         hw["other"].append(f"QEMU {prog[len('qemu-system-'):]}")
-    netdevs, nics = {}, []
+    netdevs, nics, smp = {}, [], None
     i = 1
     while i < len(argv):
         opt = argv[i].lstrip("-") if argv[i].startswith("-") else None
@@ -210,8 +226,7 @@ def parse_qemu(argv):
         elif opt == "smp":
             first, kv = _kv_opts(val)
             count = first or kv.get("cpus")
-            if count and count.isdigit():
-                hw["cpu"] = f"{count} × {hw['cpu'] or 'CPU'}"
+            smp = count if count and count.isdigit() and len(count) < 5 else None
         elif opt in ("hda", "hdb", "hdc", "hdd", "cdrom"):
             hw["disks"].append({"unit": opt, "model": None, "file": val,
                                 "kind": "cdrom" if opt == "cdrom" else "disk",
@@ -234,7 +249,7 @@ def parse_qemu(argv):
                 else:
                     nics.append({"unit": f"nic{len(nics)}", "model": None, "mac": None,
                                  "host_if": kv.get("ifname")})
-            elif opt == "nic":
+            elif opt == "nic" and first != "none":
                 nics.append({"unit": f"nic{len(nics)}", "model": kv.get("model"),
                              "mac": kv.get("mac"),
                              "host_if": kv.get("ifname") if first == "tap" else None})
@@ -251,6 +266,8 @@ def parse_qemu(argv):
             i += 1 if (i + 1 >= len(argv) or argv[i + 1].startswith("-")) else 2
             continue
         i += 2
+    if smp:
+        hw["cpu"] = f"{smp} × {hw['cpu'] or 'CPU'}"
     for n in nics:
         if isinstance(n["host_if"], tuple):
             n["host_if"] = netdevs.get(n["host_if"][1])
@@ -262,47 +279,80 @@ def parse_qemu(argv):
 
 # --- gxemul --------------------------------------------------------------------
 
+def _dict(x):
+    return x if isinstance(x, dict) else {}
+
+
+def _str(x):
+    return x if isinstance(x, str) and x else None
+
+
 def parse_gxemul(text):
     hw = empty()
     try:
         d = json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError):
         hw["problems"].append("not valid JSON")
         return hw
-    if not isinstance(d, dict):
-        return hw
-    m = d.get("machine") if isinstance(d.get("machine"), dict) else {}
-    model = m.get("model") or ""
+    d = _dict(d)
+    m = _dict(d.get("machine"))
+    model = _str(m.get("model")) or ""
     hw["machine"] = GXEMUL_MODELS.get(model) or " ".join(
-        x for x in (m.get("type"), model) if x) or None
-    if m.get("cpu"):
-        hw["cpu"] = (f"{m['cpus']} × " if m.get("cpus", 0) > 1 else "") + str(m["cpu"])
-    if m.get("memory_mb"):
-        hw["memory"] = mb(m["memory_mb"])
-    for i, drv in enumerate(d.get("drives") or []):
+        x for x in (_str(m.get("type")), model) if x) or None
+    cpus = m.get("cpus") if isinstance(m.get("cpus"), int) else 0
+    if _str(m.get("cpu")):
+        hw["cpu"] = (f"{cpus} × " if cpus > 1 else "") + m["cpu"]
+    mem = m.get("memory_mb")
+    if isinstance(mem, int) and 0 < mem < 10 ** 9:
+        hw["memory"] = mb(mem)
+    drives = d.get("drives") if isinstance(d.get("drives"), list) else []
+    for i, drv in enumerate(drives):
         if isinstance(drv, dict):
-            hw["disks"].append({"unit": f"id {drv.get('id', i)}",
-                                "model": drv.get("product") or None, "file": drv.get("file"),
+            unit = drv.get("id", i) if isinstance(drv.get("id", i), (int, str)) else i
+            hw["disks"].append({"unit": f"id {unit}", "model": _str(drv.get("product")),
+                                "file": _str(drv.get("file")),
                                 "kind": "cdrom" if drv.get("kind") == "cdrom" else "disk",
-                                "readonly": bool(drv.get("readonly"))})
-    net = d.get("network") if isinstance(d.get("network"), dict) else {}
-    if net.get("enabled"):
-        hw["nics"].append({"unit": "net0", "model": None, "mac": (net.get("mac") or "").lower()
-                           or None,
-                           "host_if": net.get("tapdev") if net.get("type") == "bridged" else None})
-        if net.get("type") and net.get("type") != "bridged":
+                                "readonly": drv.get("readonly") is True})
+    net = _dict(d.get("network"))
+    if net.get("enabled") is True:
+        mac = _str(net.get("mac"))
+        hw["nics"].append({"unit": "net0", "model": None, "mac": mac.lower() if mac else None,
+                           "host_if": _str(net.get("tapdev")) if net.get("type") == "bridged"
+                           else None})
+        if _str(net.get("type")) and net["type"] != "bridged":
             hw["other"].append(f"network: gxemul {net['type']}")
-    disp = d.get("display") if isinstance(d.get("display"), dict) else {}
-    if disp.get("enabled"):
+    if _dict(d.get("display")).get("enabled") is True:
         hw["other"].append("graphics display")
-    for slot, rom in sorted((d.get("slots") or {}).items()):
-        hw["other"].append(f"TURBOchannel slot {slot}: {os.path.basename(str(rom))}")
+    for slot, rom in sorted(_dict(d.get("slots")).items()):
+        if isinstance(rom, str):
+            hw["other"].append(f"TURBOchannel slot {slot}: {os.path.basename(rom)}")
     return hw
 
 
 # --- putting it together -------------------------------------------------------
 
 PARSERS = {"simh": parse_simh, "es40": parse_es40, "gxemul": parse_gxemul}
+MAX_BYTES = 256 * 1024          # far larger than any real emulator config
+MAX_FILES = 8
+
+
+def read_config(path):
+    """Read an emulator config the guest conf names, defensively.
+
+    Regular files only: O_NONBLOCK means a FIFO cannot hang us in open(), and
+    the type check refuses it (and devices) before any read. Bounded size.
+    """
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise OSError(0, "not a regular file")
+        data = os.read(fd, MAX_BYTES + 1)
+    finally:
+        os.close(fd)
+    if len(data) > MAX_BYTES:
+        raise OSError(0, f"larger than {MAX_BYTES // 1024} KB")
+    return data.decode("utf-8", errors="replace")
 CONFIG_SUFFIX = {"simh": ".ini", "es40": ".cfg", "gxemul": ".json"}
 
 
@@ -330,17 +380,14 @@ def apply_overrides(hw, overrides):
 
 def describe(cfg, read=None):
     """The guest's hardware. `read(path)` returns file text (for tests)."""
-    def default_read(path):
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            return fh.read(1_000_000)
-    read = read or default_read
+    read = read or read_config
     hw = empty()
     try:
         if cfg.kind == "qemu":
             hw = parse_qemu(cfg.command)
             hw["sources"] = ["command"]
         elif cfg.kind in PARSERS:
-            for path in config_files(cfg):
+            for path in config_files(cfg)[:MAX_FILES]:
                 try:
                     text = read(path)
                 except OSError as exc:

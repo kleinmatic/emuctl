@@ -10,9 +10,9 @@
   CPU, memory, task and I/O accounting.
 - `emuctl stop --now` skips the guest's shutdown, or ends one under way, and
   stops the emulator at once. The supervisor treats SIGUSR2 as this request.
-- A plain `emuctl stop` on a guest that is already stopping does nothing and
-  suggests `--now`. Under rc.d it used to send a second SIGTERM, which cut the
-  shutdown short.
+- A plain `emuctl stop` on a guest that is already stopping mentions `--now`.
+  On systemd it still waits for the stop to finish; under rc.d it now does
+  nothing, where it used to send a second SIGTERM that cut the shutdown short.
 - New guest conf keys describe the machine: `kind`, `config`, `nics`,
   `display`, `display_auth`, `display_password_file`, `notes` and
   `hw.<label>` (docs/config.md). `emuctl info` shows them and `emuctl check`
@@ -30,6 +30,18 @@
   the core keeps running on FreeBSD (docs/platforms.md).
 - `tools/devhost`: a throwaway host with four fake guests for trying emuctl
   without an emulator or root.
+
+### Breaking
+
+- `kind`, `display` and `display_auth` used to be ignored as unknown keys.
+  They now have meanings, and a conf that sets one to a value emuctl does not
+  accept fails to load (`emuctl check` says why). Rename or remove such a key.
+- `nics` interface names must look like Linux interface names (letters,
+  digits, `_`, `.`, `-`; up to 15 characters, not starting with `.` or `-`).
+- Under rc.d, `emuctl stop` on a guest that is already stopping returns at
+  once instead of cutting its shutdown short. Use `--now` for that.
+- `emuctl info <guest> --json` without `--hardware` is an error; use
+  `emuctl status <guest> --json`.
 
 ## 0.1.0 (2026-11-22)
 

@@ -138,12 +138,18 @@ def test_freeze_while_starting_is_a_power_cut(settings, tmp_path):
     assert actions.plan_stop(settings, "g1", "now").power_cut is True
 
 
-def test_a_second_plain_stop_while_stopping_does_nothing(settings, tmp_path):
+def test_a_second_plain_stop_while_stopping(settings, tmp_path):
     add_guest(settings, tmp_path, extra="stop.1 = login: | shutdown")
     set_state(settings, "g1", "stopping")
+    # systemd: join the running stop and wait for it, without a second signal.
+    plan = actions.plan_stop(settings, "g1")
+    assert plan.allowed and plan.steps == [service.stop_argv(settings, "g1")]
+    assert "waiting" in plan.message and not plan.power_cut
+    # rc.d: a second onestop would send a second SIGTERM; refuse.
+    rcd = dataclasses.replace(settings, service="rcd")
     for mode in ("clean", "force"):
-        plan = actions.plan_stop(settings, "g1", mode)
-        assert not plan.allowed and plan.code == 0 and "--now" in plan.message
+        p = actions.plan_stop(rcd, "g1", mode)
+        assert not p.allowed and p.code == 0 and "--now" in p.message
     assert actions.plan_stop(settings, "g1", "now").allowed
 
 
@@ -190,9 +196,10 @@ def test_cli_second_stop_while_stopping(settings, tmp_path, monkeypatch, capsys)
     add_guest(settings, tmp_path, extra="stop.1 = login: | shutdown")
     set_state(settings, "g1", "stopping")
     monkeypatch.setattr(cli, "load_settings", lambda: settings)
-    monkeypatch.setattr(cli, "run", lambda argv: 1 / 0)
-    assert cli.main(["stop", "g1"]) == 0
-    assert "already stopping" in capsys.readouterr().out
+    called = []
+    monkeypatch.setattr(cli, "run", lambda argv: called.append(argv) or 0)
+    assert cli.main(["stop", "g1"]) == 0 and len(called) == 1
+    assert "already stopping; waiting" in capsys.readouterr().out
 
 
 def test_cli_start_failure_from_the_service_manager(settings, tmp_path, monkeypatch, capsys):
@@ -298,7 +305,8 @@ def test_request_stop_now_counts_as_a_second_request():
 def test_a_crash_left_by_the_last_run_is_not_this_runs_result(settings, tmp_path):
     add_guest(settings, tmp_path)
     write_state(settings.run_dir, "g1", state="crashed", started_at=int(time.time()) - 300)
-    assert cli.current_state(settings, "g1", time.time()) == "starting"
+    assert cli.current_state(settings, "g1", time.time()) == "pending"
+    assert cli.current_state(settings, "g1", time.time() - 60) == "down"   # nothing new came
     write_state(settings.run_dir, "g1", state="crashed", started_at=int(time.time()))
     assert cli.current_state(settings, "g1", time.time()) == "crashed"
 
@@ -315,3 +323,15 @@ def test_start_wait_ignores_a_stale_crash(settings, tmp_path, monkeypatch, capsy
     monkeypatch.setattr(cli, "run", start)
     assert cli.main(["start", "g1", "--wait"]) == 0
     assert "crashed" not in capsys.readouterr().out
+
+
+def test_start_that_never_writes_a_state_is_reported_as_failed(settings, tmp_path, monkeypatch,
+                                                                capsys):
+    add_guest(settings, tmp_path)
+    write_state(settings.run_dir, "g1", state="crashed", started_at=int(time.time()) - 300)
+    monkeypatch.setattr(cli, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli, "run", lambda argv: 0)          # unit starts, supervisor dies
+    monkeypatch.setattr(cli, "NO_SIGN_OF_START", 0)
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    assert cli.main(["start", "g1"]) == 1
+    assert "did not start" in capsys.readouterr().err

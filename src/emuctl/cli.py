@@ -62,7 +62,8 @@ def with_usage(settings, rows, sample=False):
 
 def cmd_list(settings, args):
     rows = [guest_status(settings, name) for name in settings.guests()]
-    with_usage(settings, rows, sample=args.usage)
+    if args.usage or args.json:
+        with_usage(settings, rows, sample=args.usage)
     if args.json:
         print(json.dumps(rows, indent=2))
     elif rows:
@@ -74,6 +75,9 @@ def cmd_list(settings, args):
 
 def cmd_info(settings, args):
     cfg = need_guest(settings, args.guest)
+    if args.json and not args.hardware:
+        die("--json goes with --hardware; for the guest's state as JSON use: "
+            f"emuctl status {args.guest} --json", 2)
     if args.hardware:
         hw = hardware.describe(cfg)
         print(json.dumps(hw, indent=2) if args.json else hardware.format_hardware(hw))
@@ -96,16 +100,23 @@ def cmd_status(settings, args):
     return 1 if row["state"] in ("down", "crashed", "error") else 3
 
 
+NO_SIGN_OF_START = 15     # seconds; a supervisor writes its first state well inside this
+
+
 def current_state(settings, name, since):
     """The guest's state, ignoring a final state left by a run before `since`.
 
     Right after a start, the state file can still say `crashed` or `halted`
-    from the previous run until the new supervisor writes its own.
+    from the previous run until the new supervisor writes its own. A
+    supervisor that refuses or fails early (guard, broker port, missing
+    emulator) never writes one, so if nothing new appears within
+    NO_SIGN_OF_START seconds the start has failed: that is reported as `down`.
+    Until then the state is "pending", which is never shown.
     """
     raw = read_state(settings.run_dir, name)
     state = effective_state(raw)
     if state in ("crashed", "halted") and (raw or {}).get("started_at", 0) < int(since) - 1:
-        return "starting"
+        return "down" if time.time() - since > NO_SIGN_OF_START else "pending"
     return state
 
 
@@ -116,12 +127,12 @@ def wait_for_boot(settings, name, timeout, since=None):
     last = None
     while time.time() < deadline:
         state = current_state(settings, name, since)
-        if state != last:
+        if state != last and state != "pending":
             print(f"  {state}")
             last = state
         if state in ("ready", "stuck", "crashed", "halted"):
             return state
-        if state == "down" and time.time() > deadline - timeout + 10:
+        if state == "down" and time.time() > deadline - timeout + NO_SIGN_OF_START:
             sys.stderr.write(f"emuctl: {name} did not start; see: emuctl log {name}\n")
             return state
         time.sleep(1)
@@ -147,9 +158,13 @@ def cmd_start(settings, args):
             sys.stderr.write(f"emuctl: start failed; see: emuctl log {args.guest}\n")
             return rc
     if not args.wait:
-        # A supervisor that refuses or fails does so within a second or two.
+        # A supervisor that refuses or fails does so within a second or two,
+        # but may not write a state at all; wait for this run's own.
         time.sleep(3)
         state = current_state(settings, args.guest, since)
+        while state == "pending" and time.time() - since <= NO_SIGN_OF_START + 1:
+            time.sleep(1)
+            state = current_state(settings, args.guest, since)
         if state in ("down", "crashed"):
             sys.stderr.write(f"emuctl: {args.guest} did not start; see: emuctl log {args.guest}\n")
             return 1
@@ -280,9 +295,14 @@ def check_guest(settings, name):
             errors.append(f"config file {path} does not exist")
     if cfg.notes and not os.path.exists(cfg.notes):
         warnings.append(f"notes file {cfg.notes} does not exist")
-    if cfg.display_password_file and not os.path.exists(cfg.display_password_file):
-        errors.append(f"display_password_file {cfg.display_password_file} does not exist "
-                      f"(or this user cannot see it)")
+    if cfg.display_password_file:
+        try:
+            os.stat(cfg.display_password_file)
+        except PermissionError:
+            warnings.append(f"display_password_file {cfg.display_password_file}: this user "
+                            f"cannot see it; check as the account that needs it")
+        except OSError:
+            errors.append(f"display_password_file {cfg.display_password_file} does not exist")
     if cfg.stop_command and not (shutil.which(cfg.stop_command[0])
                                  or os.access(cfg.stop_command[0], os.X_OK)):
         errors.append(f"stop_command {cfg.stop_command[0]} is not an executable")
@@ -328,7 +348,8 @@ def cmd_check(settings, args):
     bad = 0
     for name in names:
         errors, warnings = check_guest(settings, name)
-        warnings = warnings + [w for w in net if w.startswith(f"{name}: ")]
+        warnings = warnings + [w for w in net if w.startswith(f"{name}: ")
+                               or w.startswith("network check failed")]
         print(f"{name}: " + ("ok" if not errors else f"{len(errors)} error(s)"))
         for e in errors:
             print(f"  error: {e}")

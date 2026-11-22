@@ -99,8 +99,10 @@ machine is still saved, so nothing is lost.
 You can run it while a normal `emuctl stop` is still waiting, from another
 terminal. The supervisor log says which step it abandoned.
 
-A plain `emuctl stop` on a guest that is already stopping does nothing and
-points you at `--now`.
+A plain `emuctl stop` on a guest that is already stopping waits for that stop
+to finish (on systemd) and mentions `--now`. Under rc.d it does nothing,
+because a second stop there would send a second SIGTERM and cut the shutdown
+short.
 
 If emuctl cannot signal the supervisor (no permission, or under rc.d no
 running supervisor matches the pid in the state file), it stops nothing and

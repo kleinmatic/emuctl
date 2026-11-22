@@ -112,7 +112,9 @@ def attach(settings, rows, configs, groups=None, root=CGROUP_ROOT, net_host=None
         cfg = configs.get(row["name"])
         row["disk_bytes"], row["disk_nominal_bytes"] = disk_usage(cfg.disks) if cfg \
             else (None, None)
-        row["net_rx_bytes"], row["net_tx_bytes"] = _net(cfg, net_host) if cfg else (None, None)
+        # Only for a running guest: a stopped guest's tap may carry someone else's bytes.
+        row["net_rx_bytes"], row["net_tx_bytes"] = _net(cfg, net_host) \
+            if cfg and row.get("uptime") is not None else (None, None)
     return rows
 
 

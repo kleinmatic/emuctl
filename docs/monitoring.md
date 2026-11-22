@@ -21,7 +21,7 @@ tru64       down   -        -      -
 | `mem_bytes` | MEM | memory in use now, including the emulator's file cache | `memory.current` |
 | `mem_peak_bytes` | | the most memory used since the guest started | `memory.peak` (kernel 5.19 or newer) |
 | `tasks` | | processes and threads in the guest's cgroup | `pids.current` |
-| `io_read_bytes`, `io_write_bytes` | | bytes read from and written to block devices since start; reads served from the host's cache are not counted | `io.stat` |
+| `io_read_bytes`, `io_write_bytes` | | bytes read from and written to block devices since start; reads served from the host's cache are not counted. Summed over every device in `io.stat`, so on stacked storage (LVM, LUKS, md) the same I/O can be counted at each layer | `io.stat` |
 | `disk_bytes` | | space the guest's disk images really take on the host | `stat()`: blocks × 512 |
 | `disk_nominal_bytes` | | the images' full size; larger than `disk_bytes` when an image is sparse | `stat()`: size |
 | `net_rx_bytes`, `net_tx_bytes` | | bytes the guest has received and sent over all its host interfaces, since each interface was created | `/sys/class/net/<if>/statistics` |

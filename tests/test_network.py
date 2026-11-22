@@ -71,8 +71,8 @@ def lab(tmp_path, settings):
     net.iface("br1", "bridge")
     net.iface("eth0", "physical", master="br0")
     net.iface("tap1", master="br0", rx=1000, tx=5000)
-    vea0 = net.iface("vea0", "other", master="br0")
-    net.iface("vea1", "other", iflink=vea0)
+    vea0 = net.iface("vea0", "other", master="br0", iflink=net.index + 2)   # -> vea1
+    net.iface("vea1", "other", iflink=vea0, rx=7000, tx=300)
     net.iface("tap5", master="br1", up=False)
     work = tmp_path / "work"
     work.mkdir()
@@ -91,8 +91,9 @@ def lab(tmp_path, settings):
     guest("aix", "qemu-system-ppc -net nic,macaddr=02:00:00:00:00:33 -net tap,ifname=tap5")
     guest("ghost", "vax", "nics = tap9\n")
     host = network.Host(sysfs=str(net.root),
-                        run=runner(fdb={"br0": [{"mac": "02:00:00:00:00:11", "state": ""},
-                                                {"mac": "aa:aa:aa:aa:aa:aa",
+                        run=runner(fdb={"br0": [{"mac": "02:00:00:00:00:11", "ifname": "tap1",
+                                                 "state": ""},
+                                                {"mac": "aa:aa:aa:aa:aa:aa", "ifname": "vea0",
                                                  "state": "permanent"}]},
                                    offload={"vea1": "on"}, addrs={"br0": ["192.0.2.10"]}),
                         which=lambda name: f"/usr/sbin/{name}")
@@ -130,7 +131,7 @@ def test_guest_through_a_veth_peer(lab, settings):
     (nic,) = rep["nics"]
     assert nic["bridge"] == "br0" and nic["via"] == "vea0" and nic["kind"] == "veth"
     text = " | ".join(rep["warnings"])
-    assert "has not been seen on br0" in text           # ready, MAC not learned
+    assert "nothing from it has been seen on br0" in text      # ready, MAC not learned
     assert "checksum offload is on for vea1" in text
     assert "not in any bridge" not in text
 
@@ -138,14 +139,15 @@ def test_guest_through_a_veth_peer(lab, settings):
 def test_mac_not_checked_unless_ready(lab, settings):
     host, _ = lab
     rep = network.guest_network(settings, "mips", host)        # down
-    assert not any("not been seen" in w for w in rep["warnings"])
+    assert not any("has been seen" in w for w in rep["warnings"])
     assert rep["nics"][0]["mac_seen"] is False
 
 
 def test_missing_interface_and_host_only(lab, settings):
     host, _ = lab
     ghost = network.guest_network(settings, "ghost", host)
-    assert ghost["warnings"] == ["ghost: interface tap9 does not exist"]
+    assert ghost["warnings"] == ["ghost: interface tap9 does not exist (fine if the emulator "
+                                 "creates it when it starts)"]
     aix = network.guest_network(settings, "aix", host)
     assert aix["nics"][0]["bridge"] == "br1" and aix["nics"][0]["bridge_uplink"] is False
     assert aix["nics"][0]["mac_seen"] is False         # br1's table is empty: not seen
@@ -216,7 +218,7 @@ def test_nic_counters_and_usage_rows(lab, settings):
     from emuctl.config import load_config
     cfg = load_config(settings.conf_path("alpha"))
     assert network.nic_counters(cfg, host) == (5000, 1000)
-    rows = [{"name": "alpha", "uptime": None}]
+    rows = [{"name": "alpha", "uptime": 5}]
     usage.attach(settings, rows, {"alpha": cfg}, groups={}, net_host=host)
     assert (rows[0]["net_rx_bytes"], rows[0]["net_tx_bytes"]) == (5000, 1000)
 
@@ -260,9 +262,75 @@ def test_cli_net_and_check(lab, settings, monkeypatch, capsys):
     assert "interface tap9 does not exist" in capsys.readouterr().out
 
 
+def test_veth_counters_are_not_swapped(lab, settings):
+    # The emulator's own end of a veth counts from the guest's side already.
+    host, _ = lab
+    nic = network.guest_network(settings, "mips", host)["nics"][0]
+    assert (nic["rx_bytes"], nic["tx_bytes"]) == (7000, 300)
+
+
+def test_dec_net_mac_change_still_counts_as_seen(lab, settings):
+    # A DECnet Phase IV guest switches to AA-00-04-...; anything learned on its
+    # port proves it is talking.
+    host, _ = lab
+    host._fdb["br0"] = {("aa:00:04:00:0f:70", "tap1")}
+    write_state(settings.run_dir, "alpha", state="ready", pid=os.getpid(),
+                supervisor_pid=os.getpid(), cmd="", started_at=0)
+    assert network.guest_network(settings, "alpha", host)["nics"][0]["mac_seen"] is True
+
+
+def test_peer_in_another_namespace_is_not_matched(lab):
+    host, net = lab
+    # vethX's peer lives elsewhere; its iflink happens to equal eth0's ifindex.
+    eth0 = host._read("eth0", "ifindex")
+    net.iface("vethX", "other", iflink=int(eth0))
+    assert host.peer("vethX") is None and host.bridge_of("vethX") == (None, None)
+
+
+def test_vlan_is_an_uplink_not_a_veth(lab):
+    host, net = lab
+    net.iface("eth0.10", "vlan", master="br1", iflink=2)
+    assert host.kind("eth0.10") == "vlan" and host.uplinks("br1") == ["eth0.10"]
+
+
+@pytest.mark.parametrize("name", ["../../../../etc", "/etc", "-v", ".", "..", "a/b",
+                                  "x" * 16, "", None, ["a"]])
+def test_hostile_interface_names_are_dropped(name):
+    assert not network.valid_ifname(name)
+
+
+def test_hostile_interface_name_in_emulator_config(settings, tmp_path):
+    (tmp_path / "vax.ini").write_text("attach xq tap:../../../../etc\n")
+    with open(settings.conf_path("evil"), "w") as fh:
+        fh.write(f"name = evil\nworkdir = {tmp_path}\ncommand = vax vax.ini\ndisks = d\n"
+                 "diskless = yes\nserials = 1\nbroker = 2\nready = r\n")
+    host = network.Host(sysfs=str(tmp_path / "sys"), which=lambda n: None)
+    assert network.guest_network(settings, "evil", host)["nics"] == []
+
+
+def test_stopped_guest_reports_no_traffic(lab, settings):
+    host, _ = lab
+    from emuctl import usage
+    from emuctl.config import load_config
+    rows = [{"name": "alpha", "uptime": None}]
+    usage.attach(settings, rows, {"alpha": load_config(settings.conf_path("alpha"))},
+                 groups={}, net_host=host)
+    assert rows[0]["net_rx_bytes"] is None
+
+
 def test_which_sbin_looks_in_sbin(monkeypatch, tmp_path):
     monkeypatch.setenv("PATH", str(tmp_path))
     fake = tmp_path / "bridge"
     fake.write_text("#!/bin/sh\n")
     fake.chmod(0o755)
     assert network.which_sbin("bridge") == str(fake)
+
+
+def test_guests_may_share_a_physical_nic(lab, settings, tmp_path):
+    host, _ = lab
+    for n in ("p1", "p2"):
+        with open(settings.conf_path(n), "w") as fh:
+            fh.write(f"name = {n}\nworkdir = {tmp_path}\ncommand = vax\ndisks = d.img\n"
+                     "diskless = yes\nserials = 1\nbroker = 2\nready = r\nnics = eth0\n")
+    assert not any("as does" in w and "eth0" in w
+                   for w in network.host_network(settings, host)["warnings"])

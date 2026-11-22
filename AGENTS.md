@@ -94,6 +94,17 @@ root. See the `dev-host` skill.
 10. **Tests and lint pass before a change is called done.** If they do not,
     say so plainly.
 
+## Who is trusted
+
+Whoever can write a guest conf is trusted as much as the account the guest
+runs as: the conf names the command that runs. Emulator configs the conf
+points at (`config`) are read as untrusted input all the same, because they
+are often copied from elsewhere and a future web page shows what is parsed
+from them. So parsers must never raise, hang or run slowly on hostile input,
+files are read only if they are regular files of bounded size
+(`hardware.read_config`), and interface names are checked
+(`network.valid_ifname`) before they touch sysfs or a command line.
+
 ## The web interface's security rules
 
 Once `src/emuctl/web/` exists, every change to it follows these. A console is

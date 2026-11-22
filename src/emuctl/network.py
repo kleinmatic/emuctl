@@ -11,6 +11,7 @@ Nothing here needs root.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 
@@ -19,6 +20,12 @@ from .config import ConfigError, load_config
 from .state import effective_state, read_state
 
 SYSFS = "/sys/class/net"
+IFNAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,14}")
+
+
+def valid_ifname(name):
+    """A Linux interface name we will look up: no '/', no leading '-' or '.', <= 15."""
+    return isinstance(name, str) and IFNAME.fullmatch(name) is not None
 COUNTERS = ("rx_bytes", "tx_bytes", "rx_packets", "tx_packets", "rx_errors", "tx_errors",
             "rx_dropped", "tx_dropped")
 
@@ -61,12 +68,20 @@ class Host:
             return "bridge"
         if os.path.exists(os.path.join(self.sysfs, name, "device")):
             return "physical"
+        if self._lowers(name):
+            return "vlan"                   # VLAN, macvlan, macvtap: stacked on another device
         iflink, ifindex = self._read(name, "iflink"), self._read(name, "ifindex")
         if iflink and ifindex and iflink != ifindex:
             return "veth"
         if os.path.isdir(os.path.join(self.sysfs, name, "bonding")):
             return "bond"
         return "other"
+
+    def _lowers(self, name):
+        try:
+            return [f for f in os.listdir(os.path.join(self.sysfs, name)) if f.startswith("lower_")]
+        except OSError:
+            return []
 
     def up(self, name):
         state = self._read(name, "operstate")
@@ -84,8 +99,12 @@ class Host:
         want = self._read(name, "iflink")
         if not want or want == self._read(name, "ifindex"):
             return None
+        mine = self._read(name, "ifindex")
         for other in self.names():
-            if other != name and self._read(other, "ifindex") == want:
+            # Both ends must point at each other. A peer in another network
+            # namespace has an ifindex that can collide with a local device.
+            if (other != name and self._read(other, "ifindex") == want
+                    and self._read(other, "iflink") == mine):
                 return other
         return None
 
@@ -119,7 +138,7 @@ class Host:
         return out
 
     def fdb_macs(self, bridge):
-        """Learned (not permanent) MAC addresses on `bridge`, or None if unknown."""
+        """Learned (not permanent) (mac, port) pairs on `bridge`, or None if unknown."""
         if bridge in self._fdb:
             return self._fdb[bridge]
         macs = None
@@ -127,7 +146,7 @@ class Host:
             try:
                 out = self.run([self.which("bridge"), "-j", "fdb", "show", "br", bridge],
                                capture_output=True, text=True, timeout=5).stdout
-                macs = {e["mac"].lower() for e in json.loads(out or "[]")
+                macs = {(e["mac"].lower(), e.get("ifname")) for e in json.loads(out or "[]")
                         if "permanent" not in (e.get("state") or "")
                         and "self" not in (e.get("flags") or [])}
             except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
@@ -165,21 +184,14 @@ class Host:
 
     def uplinks(self, bridge):
         """Members that lead off the host: a real NIC, a bond, or a VLAN on one."""
-        def is_uplink(m):
-            if self.kind(m) in ("physical", "bond"):
-                return True
-            try:        # a VLAN or macvlan links to the device under it as lower_<name>
-                return any(f.startswith("lower_") for f in os.listdir(os.path.join(self.sysfs, m)))
-            except OSError:
-                return False
-        return [m for m in self.members(bridge) if is_uplink(m)]
+        return [m for m in self.members(bridge) if self.kind(m) in ("physical", "bond", "vlan")]
 
 
 def guest_interfaces(cfg, hw=None):
     """[{host_if, mac, model}] for a guest: `nics` from the conf, else the
     emulator's config. MACs are matched to names where the config says."""
     hw = hw if hw is not None else hardware.describe(cfg)
-    parsed = [n for n in hw["nics"] if n.get("host_if")]
+    parsed = [n for n in hw["nics"] if valid_ifname(n.get("host_if"))]
     if not cfg.nics:
         return [{"host_if": n["host_if"], "mac": n["mac"], "model": n["model"]} for n in parsed]
     by_if = {n["host_if"]: n for n in parsed}
@@ -217,10 +229,11 @@ def guest_network(settings, name, host=None, cfg=None, state=None):
                 "dropped": None}
         nics.append(info)
         if not host.exists(ifname):
-            warnings.append(f"{name}: interface {ifname} does not exist")
+            warnings.append(f"{name}: interface {ifname} does not exist" + (
+                " (fine if the emulator creates it when it starts)" if state == "down" else ""))
             continue
         c = host.counters(ifname)
-        swap = host.kind(ifname) in ("tap", "veth")
+        swap = host.kind(ifname) == "tap"      # a tap's host side counts the other way round
         bridge, via = host.bridge_of(ifname)
         info.update(exists=True, kind=host.kind(ifname), up=host.up(ifname),
                     bridge=bridge, via=via,
@@ -231,11 +244,15 @@ def guest_network(settings, name, host=None, cfg=None, state=None):
         if info["bridge"]:
             info["bridge_uplink"] = bool(host.uplinks(info["bridge"]))
             macs = host.fdb_macs(info["bridge"])
-            if macs is not None and n["mac"]:
-                info["mac_seen"] = n["mac"].lower() in macs
+            port = via or ifname
+            if macs is not None and (n["mac"] or state == "ready"):
+                # Seen: its configured MAC, or anything learned on its port. A
+                # DECnet Phase IV guest changes its MAC to AA-00-04-... when it starts.
+                info["mac_seen"] = any(m == (n["mac"] or "").lower() or p == port
+                                       for m, p in macs)
                 if state == "ready" and not info["mac_seen"]:
-                    warnings.append(f"{name}: ready, but its MAC {n['mac']} has not been seen "
-                                    f"on {info['bridge']}")
+                    warnings.append(f"{name}: ready, but nothing from it has been seen on "
+                                    f"{info['bridge']} recently (expected MAC {n['mac']})")
         else:
             warnings.append(f"{name}: {ifname} is not in any bridge")
         if info["kind"] == "veth" and host.tx_offload(ifname):
@@ -249,15 +266,19 @@ def _sum(a, b):
     return None if a is None or b is None else a + b
 
 
-def shared_warnings(settings, interfaces):
-    """Two guests on one interface or one MAC without exclusive_with."""
+def shared_warnings(settings, interfaces, can_share=lambda ifname: False):
+    """Two guests on one interface or one MAC without exclusive_with.
+
+    `can_share(ifname)` is true for interfaces several guests may use at
+    once: a physical NIC that SIMH guests reach through pcap, for one.
+    """
     warnings, seen_if, seen_mac = [], {}, {}
     configs = {n: _load(settings, n) for n in interfaces}
     for name, nics in sorted(interfaces.items()):
         for n in nics:
             for key, seen, what in ((n["host_if"], seen_if, "interface"),
                                     ((n["mac"] or "").lower() or None, seen_mac, "MAC")):
-                if not key:
+                if not key or (what == "interface" and can_share(key)):
                     continue
                 other = seen.get(key)
                 if other and other != name:
@@ -289,7 +310,9 @@ def host_network(settings, host=None):
                          "guests": owners.get(m, [])} for m in host.members(br)],
         })
     warnings = [w for rep in reports.values() for w in rep["warnings"]]
-    warnings += shared_warnings(settings, {n: r["nics"] for n, r in reports.items()})
+    warnings += shared_warnings(settings, {n: r["nics"] for n, r in reports.items()},
+                                can_share=lambda i: host.exists(i)
+                                and host.kind(i) not in ("tap", "veth"))
     return {"bridges": bridges, "guests": reports, "warnings": warnings}
 
 
@@ -298,7 +321,7 @@ def format_host(report):
     for br in report["bridges"]:
         where = "LAN via " + ", ".join(br["uplinks"]) if br["uplinks"] else "host-only"
         addr = (" " + ", ".join(br["addresses"])) if br["addresses"] else ""
-        out.append(f"{br['name']}  ({where}){addr}{'' if br['up'] else '  DOWN'}")
+        out.append(f"{br['name']}  ({where}){addr}{'' if br['up'] else '  (no member up)'}")
         for m in br["members"]:
             who = ", ".join(m["guests"]) or ("uplink" if m["name"] in br["uplinks"] else "-")
             out.append(f"  {m['name']:<12} {m['kind']:<9} {'up' if m['up'] else 'down':<5} {who}")

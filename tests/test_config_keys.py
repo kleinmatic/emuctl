@@ -49,8 +49,9 @@ def test_defaults():
 
 def test_nics():
     assert conf("nics = tap1, vea1\n").nics == ["tap1", "vea1"]
-    with pytest.raises(ConfigError, match="interface name"):
-        conf("nics = tap1; rm -rf /\n")
+    for bad in ("tap1; rm -rf /", "../etc", "-v", ".x"):
+        with pytest.raises(ConfigError, match="interface name"):
+            conf(f"nics = {bad}\n")
 
 
 def test_display():
@@ -68,6 +69,8 @@ def test_display():
     ("display = vnc://host:5900\ndisplay_auth = vnc\n", "display_password_file"),
     ("display = vnc://host:5900\ndisplay_auth = tls\n", "display_auth"),
     ("display_password_file = p\n", "need display"),
+    ("display = vnc://h:5900\ndisplay_auth = none\ndisplay_password_file = p\n",
+     "display_auth = none"),
 ])
 def test_bad_display(extra, match):
     with pytest.raises(ConfigError, match=match):

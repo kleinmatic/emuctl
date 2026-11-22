@@ -85,10 +85,15 @@ def plan_stop(settings, name, mode="clean", cfg=None, matches=supervisor_matches
         return Plan(True, message=msg, power_cut=cut, steps=[kill, stop], state=state)
 
     if state == "stopping":
-        # A second plain stop would, under rc.d, send a second SIGTERM and cut
-        # the shutdown short. That is what --now is for; say so instead.
-        return Plan(False, 0, f"{name} is already stopping; `emuctl stop {name} --now` "
-                    f"cuts the shutdown short", state=state)
+        hint = f"`emuctl stop {name} --now` cuts the shutdown short"
+        if settings.service == "systemd":
+            # systemctl joins the stop already running and waits for it; it does
+            # not signal the supervisor again. Scripts that wait on stop keep working.
+            return Plan(True, message=f"{name} is already stopping; waiting for it ({hint})",
+                        steps=[stop], state=state)
+        # Under rc.d a second stop sends a second SIGTERM, which cuts the
+        # shutdown short. That is what --now is for; refuse instead.
+        return Plan(False, 0, f"{name} is already stopping; {hint}", state=state)
 
     clean = cfg.stop_mode == "freeze" or (state == "ready" and cfg.clean_stop)
     cut = state in CUT_STATES and not clean

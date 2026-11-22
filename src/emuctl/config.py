@@ -249,9 +249,11 @@ def parse_config(text):
         raise ConfigError("display_auth = vnc needs display_password_file")
     if (display_auth != "none" or kv.get("display_password_file")) and not display:
         raise ConfigError("display_auth and display_password_file need display")
+    if display_auth == "none" and kv.get("display_password_file"):
+        raise ConfigError("display_password_file is set but display_auth = none")
     nics = [n.strip() for n in kv.get("nics", "").split(",") if n.strip()]
     for n in nics:
-        if not re.fullmatch(r"[A-Za-z0-9_.:@-]{1,15}", n):
+        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,14}", n):
             raise ConfigError(f"nics: {n!r} is not an interface name")
     hw = {k[len(HW_PREFIX):]: v for k, v in kv.items() if k.startswith(HW_PREFIX)}
     if any(not label for label in hw):

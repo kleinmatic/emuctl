@@ -215,3 +215,51 @@ def test_fixtures_hold_nothing_real():
             for mac in re.findall(r"\b([0-9a-fA-F]{2})[:-](?:[0-9a-fA-F]{2}[:-]){4}[0-9a-fA-F]{2}",
                                   text):
                 assert int(mac, 16) & 0x02, f"{f}: MAC is not locally administered"
+
+
+def test_hostile_values_do_not_raise():
+    assert hardware.parse_simh("set cpu " + "9" * 5000 + "m\n")["memory"] is None
+    assert hardware.parse_es40("memory.bits = " + "9" * 5000)["memory"] is None
+    for text in ('{"machine":{"cpu":"R4000","cpus":null}}', '{"slots":[]}',
+                 '{"machine":{"memory_mb":"lots"}}', '{"network":{"enabled":true,"tapdev":["a"]}}',
+                 '[' * 100000):
+        hw = hardware.parse_gxemul(text)
+        assert set(hw) == set(hardware.empty())
+
+
+def test_malformed_es40_is_fast():
+    import time
+    text = "disk0.0 = file {\n" * 20000           # 340 KB of unterminated blocks
+    t0 = time.time()
+    hardware.parse_es40(text)
+    assert time.time() - t0 < 2
+
+
+def test_es40_comment_marks_inside_quotes_are_kept():
+    hw = hardware.parse_es40('sys0 = tsunami { disk0.0 = file { file = "/a//b#1.img"; } }')
+    assert hw["disks"][0]["file"] == "/a//b#1.img"
+
+
+def test_simh_nic_attached_by_name_and_set_flags():
+    hw = hardware.parse_simh("set xq mac=02-00-00-00-00-09\nattach xq eth0\n"
+                             "set rq0 writeenabled\nset rq0 ra81\n", "vax")
+    assert hw["nics"][0]["host_if"] == "eth0"
+    assert hw["disks"][0]["model"] == "RA81"
+
+
+def test_qemu_smp_before_cpu_and_nic_none():
+    hw = hardware.parse_qemu(["qemu-system-x86_64", "-smp", "2", "-cpu", "host", "-nic", "none"])
+    assert hw["cpu"] == "2 × host" and hw["nics"] == []
+
+
+def test_config_reads_refuse_fifos_and_huge_files(tmp_path):
+    fifo = tmp_path / "hang.ini"
+    os.mkfifo(fifo)
+    with pytest.raises(OSError, match="regular"):
+        hardware.read_config(str(fifo))            # returns at once, no hang
+    big = tmp_path / "big.cfg"
+    big.write_bytes(b"x" * (hardware.MAX_BYTES + 1))
+    with pytest.raises(OSError, match="larger"):
+        hardware.read_config(str(big))
+    hw = hardware.describe(conf(tmp_path, "vax", f"config = {fifo}\n"))
+    assert "not a regular file" in hw["problems"][0]
