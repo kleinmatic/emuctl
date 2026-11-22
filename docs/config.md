@@ -29,7 +29,14 @@ comments on their own line there.
 | `stuck.<n>` | none | Regular expression for console text that means the boot is waiting for a person. While it matches at the tail of the console the state is `stuck`. |
 
 `ready`, `halted` and `stuck.<n>` are matched against the last 400 bytes of
-console output, so text that scrolled by earlier cannot satisfy them.
+console output, so text that scrolled by earlier cannot satisfy them. If those
+400 bytes begin partway through a line, that partial line is left out.
+
+In the command half of a `boot.<n>` or `stop.<n>` stage, `${NAME}` is replaced
+with the environment variable `NAME` from the supervisor's environment. Use it
+for a password, so the password lives in a root-only file and not in the conf.
+The log shows the stage as written, never the value. If a stop stage names a
+variable that is not set, emuctl skips the whole stop sequence and says so.
 
 ## Stopping
 
@@ -42,6 +49,7 @@ See [stopping.md](stopping.md) for what each choice does to the guest.
 | `stop_wake` | yes | Send one Enter before the stop stages, so an idle console reprints its prompt. |
 | `stop_command` | none | A program to run instead of `stop.<n>` stages. Use it when shutting down needs a credential. Not both. |
 | `stop_timeout` | 300 | Seconds allowed for the in-guest shutdown before the emulator is stopped anyway. |
+| `halt_grace` | 0 | Seconds to wait after `halted` appears during a stop, before stopping the emulator. For a guest whose last console line comes before it has finished writing to disk. |
 | `stop_mode` | `signal` | How the emulator itself is stopped: `signal` (SIGTERM), `monitor` (QEMU `quit`), or `freeze` (SIMH save and quit). |
 | `monitor` | none | Path of QEMU's monitor socket. Required for `stop_mode = monitor`. |
 

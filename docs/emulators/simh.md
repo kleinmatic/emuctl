@@ -46,6 +46,20 @@ firmware, the console shows the firmware prompt and emuctl reports `halted`
 nothing left to run, SIMH reads end-of-file on its standard input and exits
 with status 0; emuctl records that as `down`.
 
+## Shutting the guest down
+
+For Ultrix on a MicroVAX, which halts to `>>>`:
+
+```ini
+halted = >>>
+stop.1 = login:    | root
+stop.2 = Password: | ${ROOT_PASSWORD}
+stop.3 = #         | /etc/shutdown -h now
+```
+
+The password goes in the service's environment file. See
+[stopping](../stopping.md).
+
 ## Freeze
 
 `stop_mode = freeze` suspends the machine instead of shutting it down. On stop,

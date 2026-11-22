@@ -13,16 +13,27 @@ These run only if the guest is `ready`. A guest that is still booting or is
 `stuck` is not at a prompt the sequence expects, so emuctl skips straight to
 stopping the emulator and says so in the log.
 
-**Typed stages.** For a guest whose console can shut it down without a secret,
-for example a console that stays logged in:
+**Typed stages.** emuctl sends Enter, waits for each prompt, types its
+command, then waits for the `halted` pattern. To log in first, name the
+password as a variable and put its value in the service's environment file
+(`/etc/emuctl/env/<name>.env` with the shipped systemd unit, readable only by
+root):
 
 ```ini
 halted = >>>
-stop.1 = #  | shutdown -h now
+stop.1 = login:    | root
+stop.2 = Password: | ${ROOT_PASSWORD}
+stop.3 = #         | /etc/shutdown -h now
 ```
 
-emuctl sends Enter, waits for each prompt, types its command, then waits for
-the `halted` pattern.
+```sh
+# /etc/emuctl/env/vax.env, mode 600
+ROOT_PASSWORD='...'
+```
+
+This only works if the guest is at its `login:` prompt. If someone is logged
+in on the console, the stages wait for a prompt that never comes, and the
+emulator is stopped when `stop_timeout` runs out.
 
 **A command.** When shutting down needs a password or a network login, point
 `stop_command` at a script. It can log in over the network, or drive the
@@ -32,7 +43,16 @@ service's environment file (`/etc/emuctl/env/<name>.env` with the shipped
 systemd unit) and read it from the environment.
 
 If the command exits 0 and the conf has `halted`, emuctl waits for that pattern
-before going on.
+before going on. With no `halted`, exit 0 is taken to mean the command has
+seen the guest go down itself. Exit non-zero if it could not.
+
+Some guests print their last line a little before they have finished
+writing to disk. `halt_grace` is how many seconds emuctl waits after `halted`
+matches before it stops the emulator.
+
+Write `halted` so it cannot match text printed while shutdown is still
+running. AIX, for example, prints `Wait for '....Halt completed....'` at the
+start.
 
 Either way `stop_timeout` (default 300 s) bounds the wait, and the emulator is
 stopped when it expires. A second stop request (a second SIGTERM to the

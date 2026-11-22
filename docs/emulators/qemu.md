@@ -32,6 +32,23 @@ stop_mode = monitor
 monitor   = /srv/emu/aix/monitor.sock
 ```
 
+## Shutting AIX down
+
+```ini
+stop.1     = login:    | root
+stop.2     = Password: | ${ROOT_PASSWORD}
+stop.3     = #         | shutdown -h now
+halted     = Bringing down network interfaces
+halt_grace = 15
+```
+
+AIX 5.1 on the 40p fork of QEMU never prints its final `....Halt completed....`
+after `shutdown -h`. It stops during network teardown, after the filesystems
+are unmounted. So `halted` matches the last line it does print, and
+`halt_grace` gives it a few seconds before QEMU is told to quit. Don't use
+`halted = Halt completed`: the same words appear in a warning when shutdown
+starts.
+
 ## Things worth knowing
 
 - **`quit` is not a shutdown.** `stop_mode = monitor` lets QEMU close its disk

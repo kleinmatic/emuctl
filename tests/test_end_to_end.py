@@ -1,4 +1,5 @@
 """The whole supervisor loop, against tests/fake_emulator.py."""
+import dataclasses
 import os
 import sys
 import time
@@ -115,6 +116,33 @@ def test_stop_stages_shut_the_guest_down_before_the_emulator(guest):
     assert g.state() == "down"
 
 
+def test_stop_stage_variables_come_from_the_environment_and_stay_out_of_the_log(guest):
+    g = guest(extra=BOOT + "env = HIDDEN_CMD=shutdown\nstop.1 = login: | ${HIDDEN_CMD}\n").start()
+    g.wait_state("ready")
+    g.stop()
+    log = g.console()
+    assert b"[emuctl] sent: ${HIDDEN_CMD}" in log
+    assert b"sent: shutdown" not in log
+    assert b"system halted" in log
+    assert g.state() == "down"
+
+
+def test_stop_sequence_with_an_unset_variable_is_skipped(guest):
+    g = guest(extra=BOOT + "stop.1 = login: | ${EMUCTL_TEST_UNSET_VAR}\n").start()
+    g.wait_state("ready")
+    g.stop()
+    assert b"sent:" not in g.console().split(b"login:")[-1]
+    assert b"system halted" not in g.console()
+
+
+def test_halt_grace_waits_after_the_halted_prompt(guest, capsys):
+    g = guest(extra=BOOT + "stop.1 = login: | shutdown\nhalt_grace = 1\n").start()
+    g.wait_state("ready")
+    g.stop()
+    out = capsys.readouterr().out
+    assert out.index("waiting 1s (halt_grace)") > out.index("reached its halted prompt")
+
+
 def test_stop_command_can_use_the_broker(guest, tmp_path):
     hook = tmp_path / "hook.py"
     hook.write_text(
@@ -129,6 +157,19 @@ def test_stop_command_can_use_the_broker(guest, tmp_path):
     g.stop()
     assert b"system halted" in g.console()
     assert g.state() == "down"
+
+
+def test_stop_command_exit_zero_counts_as_halted_without_a_pattern(guest, tmp_path, capsys):
+    hook = tmp_path / "hook.py"
+    hook.write_text("raise SystemExit(0)\n")
+    g = guest(extra=BOOT + f"stop_command = {sys.executable} {hook}\n")
+    g.sup.cfg = dataclasses.replace(g.cfg, halted=None)
+    g.start()
+    g.wait_state("ready")
+    g.stop()
+    out = capsys.readouterr().out
+    assert "stop_command exited 0" in out
+    assert "power cut" not in out
 
 
 def test_no_in_guest_shutdown_is_tried_before_ready(guest):

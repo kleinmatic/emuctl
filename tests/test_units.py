@@ -9,7 +9,15 @@ import pytest
 from emuctl import supervisor
 from emuctl.config import Stage
 from emuctl.state import effective_state, read_state, write_state
-from emuctl.supervisor import StageDriver, Supervisor, match_stuck, match_tail, should_poke
+from emuctl.supervisor import (
+    StageDriver,
+    Supervisor,
+    expand,
+    match_stuck,
+    match_tail,
+    missing_vars,
+    should_poke,
+)
 from emuctl.telnet import crlf_fix, strip_telnet
 
 # --- telnet ------------------------------------------------------------------
@@ -148,3 +156,37 @@ def test_monitor_quit_is_bounded(tmp_path, monkeypatch):
     started = time.time()
     sup.monitor_quit()                              # nobody ever answers
     assert time.time() - started < 5
+
+
+def test_expand_fills_names_and_leaves_other_dollars_alone():
+    env = {"PW": "s3cret", "USER_1": "root"}
+    assert expand("${USER_1} ${PW}", env) == "root s3cret"
+    assert expand("echo $HOME $ {PW} $$", env) == "echo $HOME $ {PW} $$"
+
+
+def test_expand_raises_for_an_unset_name():
+    with pytest.raises(KeyError):
+        expand("${NOPE}", {})
+
+
+def test_missing_vars_lists_each_unset_name_once():
+    stages = [Stage(b"login:", "root"), Stage(b"Password:", "${PW}"), Stage(b"#", "${PW} ${X}")]
+    assert missing_vars(stages, {"PW": "x"}) == ["X"]
+    assert missing_vars(stages, {"PW": "x", "X": "y"}) == []
+
+
+def test_match_tail_ignores_a_line_cut_by_the_window():
+    warning = b"Wait for '....Halt completed....' before stopping.\r\n"
+    filler = b"x" * 60 + b"\r\n"
+    buf = warning + filler * 6
+    cut = buf[buf.index(b"....Halt"):]          # window starts mid-line
+    pad = b"y" * (supervisor.READY_WINDOW - len(cut))
+    pattern = r"(?m)^\.+Halt completed"
+    assert not match_tail(b"z" * 50 + buf[:buf.index(b"....Halt")] + cut + pad, pattern)
+    assert match_tail(b"\r\n....Halt completed....\r\n", pattern)
+
+
+def test_aix_halted_pattern_skips_the_warning_line():
+    pattern = r"(?<![.'])\.+Halt completed"
+    assert not match_tail(b"Wait for '....Halt completed....' before stopping.\r\n", pattern)
+    assert match_tail(b"Bringing down network interfaces: en0 lo0....Halt completed....", pattern)

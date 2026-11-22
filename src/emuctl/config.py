@@ -17,7 +17,7 @@ STAGED = ("boot.", "stop.", "stuck.")
 KNOWN = set(REQUIRED) | {
     "node", "os", "emulator", "env", "diskless", "bind", "halted",
     "boot_timeout", "console_timeout", "guest_addr", "guest_port",
-    "stop_mode", "monitor", "stop_command", "stop_timeout", "stop_wake",
+    "stop_mode", "monitor", "stop_command", "stop_timeout", "stop_wake", "halt_grace",
     "exclusive_with",
 }
 
@@ -58,6 +58,7 @@ class GuestConfig:
     stop_stages: list
     stop_command: list
     stop_timeout: int
+    halt_grace: int
     stop_wake: bool
     exclusive_with: list
     unknown: list = field(default_factory=list)
@@ -217,6 +218,7 @@ def parse_config(text):
         stop_mode=stop_mode, monitor_sock=monitor_sock,
         stop_stages=stop_stages, stop_command=stop_command,
         stop_timeout=_int(kv, "stop_timeout", 300),
+        halt_grace=_int(kv, "halt_grace", 0),
         stop_wake=_bool(kv, "stop_wake", True),
         exclusive_with=[p.strip() for p in kv.get("exclusive_with", "").split(",") if p.strip()],
         unknown=sorted(k for k in kv if k not in KNOWN and not k.startswith(STAGED)),

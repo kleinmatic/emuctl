@@ -65,7 +65,7 @@ To try it without a real emulator, see [docs/quickstart.md](docs/quickstart.md).
 - [States](docs/states.md): what `emuctl list` is telling you
 - [Stopping](docs/stopping.md): what happens to the guest when you stop it
 - Emulators: [SIMH](docs/emulators/simh.md), [es40](docs/emulators/es40.md),
-  [QEMU](docs/emulators/qemu.md)
+  [QEMU](docs/emulators/qemu.md), [gxemul](docs/emulators/gxemul.md)
 - [Networking](docs/networking.md)
 - [Design](docs/design.md): why it works this way
 

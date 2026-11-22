@@ -74,10 +74,39 @@ class StageDriver:
         return None
 
 
+VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def expand(cmd, env):
+    """Replace each ${NAME} in a stage command with env[NAME].
+
+    This lets a stage type a password without the password being in the conf:
+    the value comes from the supervisor's environment, which the service
+    manager fills from a root-only file. Raises KeyError for an unset name.
+    """
+    return VAR_RE.sub(lambda m: env[m.group(1)], cmd)
+
+
+def missing_vars(stages, env):
+    """Names used as ${NAME} in `stages` that `env` does not set."""
+    return sorted({name for st in stages for name in VAR_RE.findall(st.command)
+                   if name not in env})
+
+
 def match_tail(buf, pattern):
     """True if regex `pattern` matches near the tail of `buf`, so text from
-    earlier in the scrollback cannot satisfy it."""
-    tail = buf.replace(b"\x00", b"")[-READY_WINDOW:]
+    earlier in the scrollback cannot satisfy it.
+
+    When the window cuts a line in half, that partial first line is dropped:
+    its tail could match a pattern it does not really contain, and `^` would
+    match at the cut.
+    """
+    clean = buf.replace(b"\x00", b"")
+    tail = clean[-READY_WINDOW:]
+    if len(clean) > READY_WINDOW and clean[-READY_WINDOW - 1:-READY_WINDOW] != b"\n":
+        nl = tail.find(b"\n")
+        if nl >= 0:                         # with no newline at all, keep the lot
+            tail = tail[nl + 1:]
     return re.search(pattern, tail.decode("latin-1")) is not None
 
 
@@ -106,11 +135,13 @@ class Supervisor:
         self.ready = False
         self.halted = False
         self.driver = StageDriver(cfg.boot_stages)
+        self.stage_env = dict(os.environ, **cfg.env)   # for ${NAME} in stage commands
         self.attached_at = None
         self.saw_output = False
         self.poked = False
         self.boot_deadline = None
         self.exiting = False                # the emulator has been told to exit
+        self.command_halted = False         # a stop_command with no halted pattern exited 0
 
     # --- state -----------------------------------------------------------
     def set_state(self, state, **extra):
@@ -304,7 +335,8 @@ class Supervisor:
             cmd = self.driver.feed(d)
             if cmd:
                 time.sleep(1)
-                self.send_console(cmd.encode() + b"\r")
+                # Log the command as written in the conf, never its expansion.
+                self.send_console(expand(cmd, self.stage_env).encode() + b"\r")
                 self.note(f"sent: {cmd}")
             if self.state not in ("stopping",):
                 self.judge()
@@ -374,7 +406,8 @@ class Supervisor:
         if not self.running():
             return
         log(f"stopping the emulator via {cfg.stop_mode}")
-        if cfg.stop_mode == "signal" and was != "halted" and not self.guest_is_down():
+        if (cfg.stop_mode == "signal" and was != "halted" and not self.guest_is_down()
+                and not self.command_halted):
             log("NOTE: the guest OS was not shut down first; for it this is a power cut")
         self.exiting = cfg.stop_mode != "freeze"
         try:
@@ -412,14 +445,24 @@ class Supervisor:
             hook.wait()
             return
         log(f"stop_command exited {hook.returncode}")
-        if hook.returncode == 0 and cfg.halted:
+        if hook.returncode == 0 and not cfg.halted:
+            # Nothing on the console to confirm it, so exit 0 is the command
+            # saying the guest is down.
+            self.command_halted = True
+        elif hook.returncode == 0:
             if self.pump_until(deadline, self.guest_is_down):
                 log("guest reached its halted prompt")
+                self.grace()
             elif self.running():
                 log("guest did not reach its halted prompt in time")
 
     def run_stop_stages(self, deadline):
         cfg = self.cfg
+        missing = missing_vars(cfg.stop_stages, self.stage_env)
+        if missing:
+            log(f"the stop sequence needs {', '.join(missing)}, which the supervisor's "
+                "environment does not set; skipping it")
+            return
         log(f"typing the stop sequence ({len(cfg.stop_stages)} stage(s))")
         self.driver = StageDriver(cfg.stop_stages)
         self.buf = b""
@@ -431,8 +474,16 @@ class Supervisor:
         if cfg.halted:
             if self.pump_until(deadline, self.guest_is_down):
                 log("guest reached its halted prompt")
+                self.grace()
             elif self.running():
                 log("guest did not reach its halted prompt in time")
+
+    def grace(self):
+        """Wait halt_grace seconds after the halted pattern, for a guest whose
+        last console line comes a little before it has finished writing."""
+        if self.cfg.halt_grace:
+            log(f"waiting {self.cfg.halt_grace}s (halt_grace)")
+            self.pump_until(time.time() + self.cfg.halt_grace)
 
     def monitor_quit(self):
         """Send `quit` on QEMU's human monitor and hold the connection until
@@ -506,6 +557,10 @@ class Supervisor:
             return 1
 
         self.started_at = int(time.time())
+        for kind, stages in (("boot", cfg.boot_stages), ("stop", cfg.stop_stages)):
+            missing = missing_vars(stages, self.stage_env)
+            if missing:
+                log(f"WARNING: {kind} stages use {', '.join(missing)}, which is not set")
         out = open(os.path.join(cfg.workdir, f"{cfg.name}.out"), "ab")
         self.log_fh = open(os.path.join(cfg.workdir, "console.log"), "ab", buffering=0)
         try:
