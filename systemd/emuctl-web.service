@@ -1,0 +1,46 @@
+# emuctl web interface. See docs/web.md.
+#
+# Runs as its own account, emuctl-web, never root. It starts and stops guests
+# through the polkit rule in examples/polkit/, and reads guest workdirs
+# through group membership the admin grants (docs/web.md says which).
+#
+# Settings: /etc/emuctl/web.conf. Certificate, key and users file: in
+# /var/lib/emuctl-web unless web.conf names other places.
+[Unit]
+Description=emuctl web interface
+Documentation=https://github.com/kleinmatic/emuctl/blob/main/docs/web.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=emuctl-web
+Group=emuctl-web
+SupplementaryGroups=systemd-journal
+ExecStart=/usr/local/bin/emuctl web serve
+Restart=on-failure
+RestartSec=5
+StateDirectory=emuctl-web
+StateDirectoryMode=0700
+LogsDirectory=emuctl
+LogsDirectoryMode=0755
+# The daemon reads a great deal and writes only the two directories above.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

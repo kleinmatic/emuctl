@@ -19,7 +19,10 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-test = ["pytest>=8", "pytest-cov"]
+test = ["pytest>=8", "pytest-cov",
+        "aiohttp>=3.9; python_version >= '3.11'",
+        "pytest-aiohttp; python_version >= '3.11'"]
+web = ["aiohttp>=3.9"]
 release = ["build"]
 
 [project.scripts]
@@ -31,9 +34,15 @@ version = { attr = "emuctl.__version__" }
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"emuctl.web" = ["static/*", "static/**/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "tests", "tools"]
+# For the web tests (pytest-aiohttp). Harmless warnings where it is not installed.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
 line-length = 100

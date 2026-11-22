@@ -16,7 +16,30 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install pytest pytest-cov ruff
+      # aiohttp is for the web part only; on 3.10 its tests skip themselves.
+      - run: python -m pip install pytest pytest-cov ruff aiohttp pytest-aiohttp
       - run: ruff check src tests tools tools/devhost
       - run: python -m pytest -q --cov=emuctl --cov-report=json --cov-report=term
-      - run: python tools/coverage_check.py coverage.json
+      # The web daemon needs 3.11, so 3.10 cannot cover it.
+      - if: matrix.python != '3.10'
+        run: python tools/coverage_check.py coverage.json
+
+  javascript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test tests/js/*.test.mjs
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pytest aiohttp pytest-playwright
+      - run: python -m playwright install --with-deps chromium
+      - run: EMUCTL_BROWSER=1 python -m pytest -q tests/browser

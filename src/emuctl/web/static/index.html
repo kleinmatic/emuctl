@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>emuctl</title>
+<link rel="stylesheet" href="/static/css/app.css">
+<script type="module" src="/static/js/app.js"></script>
+</head>
+<body>
+<header class="bar">
+  <strong>emuctl</strong>
+  <span class="where" id="where"></span>
+  <label class="spacer"><span class="sr-only">Search guests</span>
+    <input type="search" id="search" placeholder="Search guests"></label>
+  <span id="user"></span>
+  <button class="link" id="theme" type="button">Dark</button>
+  <button class="link" id="logout" type="button">Log out</button>
+</header>
+<div class="layout">
+  <nav class="tree" id="tree" aria-label="Guests"></nav>
+  <main id="main"><div class="content"><div class="empty">Loading…</div></div></main>
+</div>
+</body>
+</html>

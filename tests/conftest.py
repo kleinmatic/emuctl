@@ -13,6 +13,11 @@ from emuctl.state import read_state
 
 FAKE = os.path.join(os.path.dirname(__file__), "fake_emulator.py")
 
+# The browser tests drive Playwright's own event loop, which cannot share a
+# session with the asyncio web tests. Run them on their own:
+#     EMUCTL_BROWSER=1 python3 -m pytest tests/browser
+collect_ignore = [] if os.environ.get("EMUCTL_BROWSER") else ["browser"]
+
 
 def free_ports(n):
     socks = [socket.socket() for _ in range(n)]

@@ -1,0 +1,14 @@
+// Let the emuctl web daemon start, stop and signal emuctl guests, and
+// nothing else. Install as /etc/polkit-1/rules.d/50-emuctl-web.rules.
+// See docs/web.md.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        subject.user == "emuctl-web") {
+        var unit = action.lookup("unit");
+        var verb = action.lookup("verb");
+        if (unit && /^emuctl-guest@[A-Za-z0-9][A-Za-z0-9_.-]*\.service$/.test(unit) &&
+            (verb == "start" || verb == "stop" || verb == "kill")) {
+            return polkit.Result.YES;
+        }
+    }
+});

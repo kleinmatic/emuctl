@@ -17,6 +17,8 @@ STAGED = ("boot.", "stop.", "stuck.")
 HW_PREFIX = "hw."
 KINDS = ("simh", "es40", "qemu", "gxemul", "other")
 DISPLAY_AUTH = ("none", "vnc")
+# What a guest name may be. The web interface checks names from URLs against it.
+NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 KNOWN = set(REQUIRED) | {
     "node", "os", "emulator", "env", "diskless", "bind", "halted",
     "boot_timeout", "console_timeout", "guest_addr", "guest_port",
@@ -179,7 +181,7 @@ def parse_config(text):
             raise ConfigError(f"missing required key: {key}")
 
     name = kv["name"]
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name):
+    if not NAME_PATTERN.fullmatch(name):
         raise ConfigError(f"name must be letters, digits, '.', '_' or '-', got {name!r}")
 
     workdir = kv["workdir"]

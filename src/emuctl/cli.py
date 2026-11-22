@@ -373,6 +373,11 @@ def cmd_net(settings, args):
     return 0
 
 
+def cmd_web(settings, args):
+    from .web import main as web_main
+    return web_main.run(settings, args, args.web_parser)
+
+
 def cmd_supervise(settings, args):
     cfg = need_guest(settings, args.guest)
     return supervisor.main(cfg, settings)
@@ -439,6 +444,10 @@ def build_parser():
     s = sub.add_parser("check", help="validate a guest's conf against this host")
     s.add_argument("guest", nargs="?")
     s.set_defaults(func=cmd_check)
+
+    from .web import main as web_main
+    s = web_main.add_parser(sub)
+    s.set_defaults(func=cmd_web, web_parser=s)
 
     s = sub.add_parser("supervise", help="run a guest's supervisor in the foreground "
                                          "(what the service manager runs)")

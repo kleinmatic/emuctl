@@ -364,16 +364,25 @@ def format_guest(report):
     return "\n".join(out)
 
 
-def nic_counters(cfg, host=None):
-    """Total traffic into and out of the guest over all its interfaces."""
+def nic_counters_each(cfg, host=None):
+    """{host_if: (rx, tx)} for each of the guest's interfaces that exists,
+    counted from the guest's side."""
     host = host or Host()
-    rx = tx = None
+    out = {}
     for n in guest_interfaces(cfg):
         if not host.exists(n["host_if"]):
             continue
         c = host.counters(n["host_if"])
         swap = host.kind(n["host_if"]) in ("tap", "veth")
-        r, t = (c["tx_bytes"], c["rx_bytes"]) if swap else (c["rx_bytes"], c["tx_bytes"])
+        out[n["host_if"]] = (c["tx_bytes"], c["rx_bytes"]) if swap \
+            else (c["rx_bytes"], c["tx_bytes"])
+    return out
+
+
+def nic_counters(cfg, host=None):
+    """Total traffic into and out of the guest over all its interfaces."""
+    rx = tx = None
+    for r, t in nic_counters_each(cfg, host).values():
         rx = (rx or 0) + (r or 0)
         tx = (tx or 0) + (t or 0)
     return rx, tx
