@@ -284,3 +284,33 @@ def test_passwd_prompts_twice(tmp_path, monkeypatch):
     args = types.SimpleNamespace(user="alice", delete=False, stdin=False)
     assert web_main.cmd_passwd(args) == 1
     assert auth.read_users(str(tmp_path / "users")) == {}
+
+
+def test_a_known_user_is_not_locked_out_by_someone_else():
+    clock = Clock()
+    lim = auth.LoginLimiter(clock=clock)
+    tok = lim.failed("192.0.2.1", "alice")
+    lim.succeeded("192.0.2.1", "alice", tok)
+    for _ in range(12):
+        lim.failed("198.51.100.66", "alice")
+    assert lim.wait("192.0.2.1", "alice") == 0          # her own address still gets in
+    assert lim.wait("198.51.100.9", "alice") > 0        # a new address is slowed
+
+
+def test_a_new_password_ends_sessions(tmp_path, monkeypatch):
+    monkeypatch.setattr(auth, "LOG2_N", FAST)
+    p = str(tmp_path / "users")
+    auth.set_password(p, "alice", "a long password")
+    users = auth.Users(p)
+    sessions = auth.Sessions(users)
+    s = sessions.new("alice")
+    assert sessions.get(s.token) is s
+    auth.set_password(p, "alice", "another password")
+    assert sessions.get(s.token) is None
+
+
+def test_passwd_will_not_overwrite_an_unreadable_file(tmp_path):
+    p = tmp_path / "users"
+    os.symlink(tmp_path / "elsewhere", p)
+    with pytest.raises(auth.AuthError, match="not changing it"):
+        auth.set_password(str(p), "alice", "a long password")

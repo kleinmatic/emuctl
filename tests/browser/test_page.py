@@ -193,3 +193,29 @@ def test_refused_start_says_why(page, devhost_daemon):
     page.wait_for_function(
         "() => document.querySelector('.titlebar button')?.title.includes('exclusive')")
     assert start.is_disabled()
+
+
+def test_console_types_at_the_guest(page, devhost_daemon):
+    base, password = devhost_daemon
+    page.goto(base + "/")
+    page.fill("input[name=user]", "dev")
+    page.fill("input[name=password]", password)
+    page.click("button[type=submit]")
+    page.wait_for_selector("table.data")
+    page.goto(base + "/#/g/vax/summary")
+    page.click(".titlebar button:has-text('Start')")
+    wait_state(page, "ready")
+    page.goto(base + "/#/g/vax/console")
+    page.wait_for_selector(".xterm-rows:has-text('login:')", timeout=15000)
+    assert "Viewing" in page.locator(".console-banner").inner_text()
+    page.click(".terminal")
+    page.keyboard.type("dropped")                   # viewing: not sent
+    page.click(".console-banner button:has-text('Take keyboard')")
+    page.wait_for_selector(".console-banner:has-text('Typing')")
+    page.click(".terminal")
+    page.keyboard.type("hello")
+    page.keyboard.press("Enter")
+    page.wait_for_selector(".xterm-rows:has-text('?hello')", timeout=10000)
+    assert "dropped" not in page.locator(".xterm-rows").inner_text()
+    page.click(".console-banner button:has-text('Release keyboard')")
+    page.wait_for_selector(".console-banner:has-text('Viewing')")

@@ -3,7 +3,7 @@
 //   #/              the host
 //   #/host/network  the host's bridges
 //   #/g/<guest>/<tab>   one guest: summary, network, hardware, logs
-import { get, post, setCsrf } from "./api.js";
+import { get, poll, post, setCsrf } from "./api.js";
 import { clear, h } from "./dom.js";
 import { stateClass } from "./format.js";
 import { applyTheme, currentTheme, toggleTheme } from "./theme.js";
@@ -86,7 +86,7 @@ function listen() {
   es.onerror = async () => {
     // The stream ends on logout, an expired session or a daemon restart.
     // EventSource retries by itself; check whether we are still logged in.
-    try { await get("/api/session"); } catch (e) { es.close(); }
+    try { await poll("/api/session"); } catch (e) { es.close(); }
   };
 }
 

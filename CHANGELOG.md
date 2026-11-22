@@ -13,6 +13,11 @@
   asking before anything that is a power cut. Each action is a task with
   its output, recorded with the user's name in a task log. Start is
   disabled, with the reason, when the start guard would refuse.
+- The web page has each guest's serial console (xterm.js), shared with
+  `emuctl console`. It opens watching, with the recent console log as
+  scrollback; "Take keyboard" lets you type. It can send Ctrl-P, Ctrl-E,
+  Ctrl-C and Ctrl-], paste slowly for consoles that drop fast input, and
+  download the log.
 
 - `emuctl list` shows GUEST, STATE, UPTIME and DETAIL and fits in 80 columns.
   `--node`, `--os` and `--emulator` add those columns back; `--usage` adds

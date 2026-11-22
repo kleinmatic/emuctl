@@ -5,9 +5,11 @@ import { chart } from "../chart.js";
 import { clear, h, kv } from "../dom.js";
 import { DASH, bytes, isUp, last, longUptime, pct, rate } from "../format.js";
 import { actionButtons } from "./actions.js";
+import { consoleView } from "./console.js";
 import { stateBadge, warningList } from "./host.js";
 
-const TABS = [["summary", "Summary"], ["network", "Network"], ["hardware", "Hardware"], ["logs", "Logs"]];
+const TABS = [["summary", "Summary"], ["console", "Console"], ["network", "Network"],
+  ["hardware", "Hardware"], ["logs", "Logs"]];
 
 function nicLine(n) {
   if (!n.exists) return `${n.host_if} · does not exist`;
@@ -203,7 +205,13 @@ export function guestView(name, tab, store) {
     return [h("div", { class: "toolbar" }, source, lines, h("button", { class: "btn", type: "button", onclick: load, text: "Refresh" })), pre];
   }
 
-  const loaders = { summary, network, hardware, logs };
+  let term = null;
+  async function console_() {
+    if (!term) term = consoleView(name, store);
+    return [term.el];
+  }
+
+  const loaders = { summary, console: console_, network, hardware, logs };
   let busy = false;
   async function render(refresh = false) {
     if (busy) return;
@@ -221,5 +229,5 @@ export function guestView(name, tab, store) {
   renderHead();
   if (tab !== "summary") refreshDetail();
   render();
-  return { el, close() { closed = true; store.listeners.delete(onRows); } };
+  return { el, close() { closed = true; store.listeners.delete(onRows); if (term) term.close(); } };
 }

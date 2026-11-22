@@ -62,13 +62,13 @@ async def test_a_task_runs_emuctl_and_logs_it(settings, tmp_path, fake_cmd, monk
     log = tmp_path / "logs" / "tasks.log"
     tasks = Tasks(settings, str(log), lambda e, p: events.append((e, p["result"])),
                   command=fake_cmd)
-    t = await tasks.submit("alice", "g1", "stop-now")
+    t = await tasks.submit("alice", "g1", "stop-now", confirmed=True)
     assert t.result == "running" and tasks.running["g1"] is t
     await finished(tasks, t)
     assert t.result == "ok" and t.rc == 0
     assert t.output == ["for the guest it is a power cut", "ran: stop g1 --now"]
     assert events == [("task", "running"), ("task", "ok")]
-    line = json.loads(log.read_text())
+    line = json.loads(log.read_text().splitlines()[-1])
     assert (line["user"], line["guest"], line["action"], line["result"]) == \
         ("alice", "g1", "stop-now", "ok")
     assert "g1" not in tasks.running
@@ -101,7 +101,9 @@ async def test_one_task_per_guest_but_stop_now_cuts_in(settings, tmp_path, fake_
     first = await tasks.submit("alice", "slow-1.0", "shutdown")
     second = await tasks.submit("bob", "slow-1.0", "start")
     assert second.result == "refused" and "shutdown by alice" in second.message
-    third = await tasks.submit("bob", "slow-1.0", "stop-now")
+    third = await tasks.submit("bob", "slow-1.0", "stop-now", confirmed=True)
+    fourth = await tasks.submit("bob", "slow-1.0", "stop-now", confirmed=True)
+    assert fourth.result == "refused"
     assert third.result == "running"
     other = await tasks.submit("bob", "other", "start")         # other guests are free
     await finished(tasks, other)
@@ -160,7 +162,8 @@ async def test_start_and_stop_routes(client, monkeypatch):
     assert t["user"] == "alice" and t["action"] == "start" and t["guest"] == "g1"
     tasks = client.app[webapp.TASKS]
     await finished(tasks, tasks.get(t["id"]))
-    r = await client.post("/api/guests/g1/stop", json={"mode": "now"}, headers=h)
+    r = await client.post("/api/guests/g1/stop", json={"mode": "now", "power_cut": True},
+                          headers=h)
     t2 = await r.json()
     await finished(tasks, tasks.get(t2["id"]))
     got = await (await client.get(f"/api/tasks/{t2['id']}", headers=h)).json()
@@ -198,3 +201,70 @@ async def test_detail_carries_the_stop_decisions(client):
 def test_task_log_path_default():
     assert WebConf().task_log == "/var/log/emuctl/web-tasks.log"
     assert os.path.isabs(WebConf().task_log)
+
+
+async def test_an_unconfirmed_power_cut_is_refused(settings, tmp_path, fake_cmd, monkeypatch):
+    allow(monkeypatch, "for the guest it is a power cut")
+    tasks = Tasks(settings, str(tmp_path / "t.log"), command=fake_cmd)
+    t = await tasks.submit("alice", "g1", "stop-now")
+    assert t.result == "refused" and "Not confirmed" in t.message
+    assert "g1" not in tasks.running
+
+
+async def test_force_without_a_cut_runs_without_force(settings, tmp_path, fake_cmd, monkeypatch):
+    """Confirmed nothing because no cut was planned: the command may not cut either."""
+    monkeypatch.setattr(actions, "plan_stop",
+                        lambda s, n, mode: actions.Plan(True, steps=[["x"]], power_cut=False))
+    tasks = Tasks(settings, str(tmp_path / "t.log"), command=fake_cmd)
+    t = await finished(tasks, await tasks.submit("alice", "g1", "stop"))
+    assert t.output == ["ran: stop g1"]
+    t = await finished(tasks, await tasks.submit("alice", "g1", "stop", confirmed=True))
+    assert t.output == ["ran: stop g1 --force"]
+
+
+async def test_concurrent_submits_claim_the_guest_first(settings, tmp_path, fake_cmd, monkeypatch):
+    allow(monkeypatch)
+    tasks = Tasks(settings, str(tmp_path / "t.log"), command=fake_cmd)
+    ts = await asyncio.gather(*[tasks.submit("alice", "slow-0.5", a)
+                                for a in ("start", "start", "shutdown")])
+    assert sorted(t.result for t in ts) == ["refused", "refused", "running"]
+    for t in ts:
+        await finished(tasks, t)
+
+
+async def test_a_huge_line_does_not_wedge_the_guest(settings, tmp_path, monkeypatch):
+    allow(monkeypatch)
+    cmd = [sys.executable, "-c", "import sys; sys.stdout.write('x' * 300000); print(); "
+           "print('the real error'); sys.exit(1)"]
+    tasks = Tasks(settings, str(tmp_path / "t.log"), command=cmd)
+    t = await finished(tasks, await tasks.submit("alice", "g1", "start"))
+    assert t.result == "failed" and t.message == "the real error"
+    assert "g1" not in tasks.running
+
+
+async def test_a_hung_command_is_killed(settings, tmp_path, monkeypatch):
+    allow(monkeypatch)
+    import emuctl.web.tasks as tasks_mod
+    monkeypatch.setattr(tasks_mod, "DEADLINE", 0.5)
+    cmd = [sys.executable, "-c", "import time; time.sleep(30)"]
+    tasks = Tasks(settings, str(tmp_path / "t.log"), command=cmd)
+    t = await finished(tasks, await tasks.submit("alice", "g1", "start"))
+    assert t.result == "failed" and "gave up" in t.message
+
+
+async def test_close_waits_for_running_tasks(settings, tmp_path, fake_cmd, monkeypatch):
+    allow(monkeypatch)
+    tasks = Tasks(settings, str(tmp_path / "t.log"), command=fake_cmd)
+    t = await tasks.submit("alice", "slow-0.5", "start")
+    await tasks.close()
+    assert t.result == "ok"
+    lines = [json.loads(x) for x in (tmp_path / "t.log").read_text().splitlines()]
+    assert [x["result"] for x in lines] == ["running", "ok"]       # logged at start too
+
+
+async def test_flood_keeps_the_last_line(settings, tmp_path, monkeypatch):
+    allow(monkeypatch)
+    cmd = [sys.executable, "-c", "for i in range(1000): print('line', i)\nprint('the end')"]
+    tasks = Tasks(settings, str(tmp_path / "t.log"), command=cmd)
+    t = await finished(tasks, await tasks.submit("alice", "g1", "start"))
+    assert t.message == "the end" and len(t.output) == 201 and t.output[-1] == "…"

@@ -158,8 +158,9 @@ explains them to users.
 
 In the page's JavaScript: build the page with `dom.js`'s `h()` and
 `textContent`, never `innerHTML`, since guest names, console text and log
-lines are untrusted. No inline `style=` attributes or inline scripts (the CSP
-forbids both); set a computed size through `el.style` in code.
+lines are untrusted. No inline scripts (the CSP forbids them). The CSP allows
+inline styles only because xterm.js needs them; our own code still uses CSS
+classes, and `el.style` for a computed size, not `style=` attributes.
 
 The `web-security-check` skill walks a diff against these.
 

@@ -85,14 +85,17 @@ def parse_users(text):
     return users
 
 
-def read_users(path):
+def read_users(path, strict=False):
     """The users in `path`. A file that cannot be read gives no users, so
-    nobody can log in, rather than an error on every request."""
+    nobody can log in, rather than an error on every request. With strict
+    (when about to rewrite it), anything but a missing file is an error."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     except FileNotFoundError:
         return {}
     except OSError as exc:
+        if strict:
+            raise AuthError(f"cannot read {path}: {exc.strerror or exc}; not changing it")
         log.warning("cannot read the users file %s: %s", path, exc)
         return {}
     with os.fdopen(fd) as fh:
@@ -114,13 +117,14 @@ def _as_owner_of(d):
     st = os.lstat(d)
     if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
         raise AuthError(f"{d} is not a directory")
-    os.setegid(st.st_gid)
-    os.seteuid(st.st_uid)
+    egid = os.getegid()
     try:
+        os.setegid(st.st_gid)
+        os.seteuid(st.st_uid)
         yield
     finally:
         os.seteuid(0)
-        os.setegid(0)
+        os.setegid(egid)
 
 
 def _check_dir(path):
@@ -182,7 +186,7 @@ def _update(path):
                        0o600)
         try:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            users = read_users(path)
+            users = read_users(path, strict=True)
             yield users
             write_users(path, users)
         finally:
@@ -247,6 +251,7 @@ class Session:
     csrf: str
     created: float
     seen: float
+    hash: str = ""              # the password hash at login: a new password ends the session
 
 
 class Sessions:
@@ -259,7 +264,9 @@ class Sessions:
 
     def new(self, user):
         now = self.clock()
-        s = Session(secrets.token_urlsafe(32), user, secrets.token_urlsafe(32), now, now)
+        u = self.users.get(user)
+        s = Session(secrets.token_urlsafe(32), user, secrets.token_urlsafe(32), now, now,
+                    getattr(u, "hash", ""))
         self._by_token[s.token] = s
         self._prune(now)
         return s
@@ -272,8 +279,9 @@ class Sessions:
         if s is None:
             return None
         now = self.clock()
-        if (now - s.seen > self.idle or now - s.created > self.max_age
-                or self.users.get(s.user) is None):
+        u = self.users.get(s.user)
+        if (now - s.seen > self.idle or now - s.created > self.max_age or u is None
+                or getattr(u, "hash", "") != s.hash):
             self.end(token)
             return None
         if touch:
@@ -329,6 +337,7 @@ class LoginLimiter:
     clock: object = time.time
     _seen: dict = field(default_factory=dict)
     _recent: list = field(default_factory=list)
+    _good: set = field(default_factory=set)
 
     def _wait_for(self, key, now):
         f = self._seen.get(key)
@@ -342,16 +351,23 @@ class LoginLimiter:
     def wait(self, addr, user=None):
         """Seconds before this address (and user name) may try again; 0 means now."""
         now = self.clock()
-        self._recent = [t for t in self._recent if now - t < 60]
+        self._recent = [r for r in self._recent if now - r[0] < 60]
         busy = 0
         if len(self._recent) >= self.global_rate:
-            busy = self._recent[0] + 60 - now
-        keys = [("addr", _addr_key(addr))] + ([("user", user)] if user else [])
+            busy = self._recent[0][0] + 60 - now
+        keys = [("addr", _addr_key(addr))]
+        # The per-name count slows guessing from many addresses, but must not
+        # lock the real user out: it does not apply where that name has
+        # logged in before.
+        if user and (_addr_key(addr), user) not in self._good:
+            keys.append(("user", user))
         return max([busy] + [self._wait_for(k, now) for k in keys])
 
     def failed(self, addr, user=None):
+        """Charge a failure. Returns a token for succeeded() to give it back."""
         now = self.clock()
-        self._recent.append(now)
+        token = object()
+        self._recent.append((now, token))
         for key in [("addr", _addr_key(addr))] + ([("user", user)] if user else []):
             f = self._seen.get(key)
             if not f or now - f.last > self.forget:
@@ -362,13 +378,18 @@ class LoginLimiter:
             for k, old in list(self._seen.items()):
                 if now - old.last > self.forget:
                     del self._seen[k]
+        return token
 
-    def succeeded(self, addr, user=None):
-        """A good login: undo the failure charged for this attempt, and clear the user name."""
+    def succeeded(self, addr, user=None, token=None):
+        """A good login: give back the failure charged for this attempt (by
+        its token), and clear the user name."""
         f = self._seen.get(("addr", _addr_key(addr)))
         if f and f.count > 0:
             f.count -= 1
-        if self._recent:
-            self._recent.pop()
+        self._recent = [r for r in self._recent if r[1] is not token]
+        if user:
+            if len(self._good) > 10000:
+                self._good.clear()
+            self._good.add((_addr_key(addr), user))
         if user:
             self._seen.pop(("user", user), None)

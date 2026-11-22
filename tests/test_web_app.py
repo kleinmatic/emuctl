@@ -243,7 +243,9 @@ async def test_security_headers_everywhere(client):
                           ("/api/guests", {}), ("/static/login.html", {}), ("/nothing", {})):
         r = await client.get(path, headers=headers)
         assert r.headers["Content-Security-Policy"] == webapp.CSP, path
-        assert "unsafe" not in r.headers["Content-Security-Policy"]
+        csp = dict(d.strip().split(" ", 1) for d in r.headers["Content-Security-Policy"].split(";"))
+        assert csp["script-src"] == "'self'" and csp["connect-src"] == "'self'"
+        assert "unsafe" not in csp["default-src"] + csp["script-src"]
         assert r.headers["X-Frame-Options"] == "DENY"
         assert r.headers["X-Content-Type-Options"] == "nosniff"
     assert (await client.get("/api/guests", headers=h)).headers["Cache-Control"] == "no-store"

@@ -10,7 +10,8 @@ Security rules (AGENTS.md) enforced here, in one place:
   6  file access .................... data.safe_path, data.tail_bytes
   7  login limit .................... login(), auth.LoginLimiter
   8  CSP ............................ add_security_headers
-  9  task log ....................... tasks.py; every action route goes through it
+  9  task log ....................... tasks.py; every action route goes through it,
+                                     and console.py notes each keyboard take
 Every route handler is marked @public or @needs(role). A handler with
 neither is refused, so a route cannot be added open by mistake.
 """
@@ -30,6 +31,7 @@ from .. import full_version
 from ..config import NAME_PATTERN, ConfigError, load_config
 from . import data, tls
 from .auth import LoginLimiter, Sessions, Users
+from .auth import _addr_key as auth_addr_key
 from .sampler import Sampler
 from .tasks import Tasks
 
@@ -41,13 +43,19 @@ BACKGROUND_HEADER = "X-Emuctl-Background"
 STREAMS_PER_SESSION = 4
 BODY_TIMEOUT = 10           # seconds to send a request body
 WRITE_TIMEOUT = 30          # seconds a page may take to accept an event
-CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+# Inline styles are allowed because xterm.js writes its colours and sizes
+# into <style> elements it makes. Scripts are not: they come from our own
+# files only. The page builds everything with textContent, so there is no
+# markup from the server in which a style could be injected.
+CSP = ("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+       "img-src 'self' data:; "
        "font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
        "form-action 'self'")
 ROLE_RANK = {"viewer": 0, "operator": 1, "admin": 2}
 SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
 HEARTBEAT = 15
 LOGIN_CHECKS = 4            # scrypt checks at once; each takes 32 MB
+LOGINS_INFLIGHT = 4         # login requests at once from one address
 
 SETTINGS = web.AppKey("settings", object)
 CONF = web.AppKey("conf", object)
@@ -164,7 +172,8 @@ async def auth_middleware(request, handler):
 
     # The page's own timed refreshes say so, and do not count as the user
     # being active: a forgotten tab still lets the session time out.
-    background = request.headers.get(BACKGROUND_HEADER) == "1"
+    background = (request.headers.get(BACKGROUND_HEADER) == "1"
+                  or request.path == "/api/events")   # EventSource cannot send headers
     session = request.app[SESSIONS].get(request.cookies.get(COOKIE), touch=not background)
     if session is None:
         if request.path.startswith("/api/"):
@@ -282,6 +291,22 @@ async def read_json(request):
 async def login(request):
     app, addr = request.app, request.remote or "?"
     limiter = app[LIMITER]
+    # A few logins at a time per address, before the body is even read, so
+    # slow senders cannot tie up the daemon either.
+    inflight = app[STATE]["logins_inflight"]
+    key = auth_addr_key(addr)
+    if inflight.get(key, 0) >= LOGINS_INFLIGHT:
+        raise json_error(web.HTTPTooManyRequests, "too many logins at once from this address")
+    inflight[key] = inflight.get(key, 0) + 1
+    try:
+        return await _login(request, app, addr, limiter)
+    finally:
+        inflight[key] -= 1
+        if not inflight[key]:
+            del inflight[key]
+
+
+async def _login(request, app, addr, limiter):
     body = await read_json(request)
     name, password = body.get("user"), body.get("password")
     if not (isinstance(name, str) and isinstance(password, str)
@@ -295,13 +320,13 @@ async def login(request):
         raise json_error(web.HTTPTooManyRequests,
                          f"too many failed logins; try again in {math.ceil(wait)} s",
                          headers={"Retry-After": str(math.ceil(wait))})
-    limiter.failed(addr, name)
+    charge = limiter.failed(addr, name)
     loop = asyncio.get_running_loop()
     user = await loop.run_in_executor(app[STATE]["login_pool"], app[USERS].check, name, password)
     if user is None:
         log.warning("failed login for %r from %s", name[:64], addr)
         raise json_error(web.HTTPUnauthorized, "wrong user name or password")
-    limiter.succeeded(addr, name)
+    limiter.succeeded(addr, name, charge)
     session = app[SESSIONS].new(user.name)
     log.info("%s logged in from %s", user.name, addr)
     resp = web.json_response({"user": user.name, "role": user.role, "csrf": session.csrf})
@@ -355,13 +380,15 @@ NET_CACHE = 10     # seconds; the network report runs ip, bridge and ethtool
 async def cached(app, key, build):
     """The result of build() in a thread, shared by every page for NET_CACHE seconds."""
     cache = app[STATE]["net_cache"]
-    now = asyncio.get_running_loop().time()
-    hit = cache.get(key)
-    if hit and now - hit[0] < NET_CACHE:
-        return hit[1]
-    out = await asyncio.to_thread(build)
-    cache[key] = (now, out)
-    return out
+    lock = app[STATE].setdefault("net_locks", {}).setdefault(key, asyncio.Lock())
+    async with lock:            # many pages at once: one report
+        now = asyncio.get_running_loop().time()
+        hit = cache.get(key)
+        if hit and now - hit[0] < NET_CACHE:
+            return hit[1]
+        out = await asyncio.to_thread(build)
+        cache[key] = (asyncio.get_running_loop().time(), out)
+        return out
 
 
 @routes.get("/api/host/network")
@@ -462,7 +489,9 @@ async def guest_stop(request):
     action = STOP_ACTIONS.get(body.get("mode")) if isinstance(body.get("mode"), str) else None
     if action is None:
         raise json_error(web.HTTPBadRequest, "mode must be clean, force or now")
-    t = await request.app[TASKS].submit(request["user"].name, request["guest"], action)
+    # The page sends power_cut: true only after the user confirmed one.
+    t = await request.app[TASKS].submit(request["user"].name, request["guest"], action,
+                                        confirmed=body.get("power_cut") is True)
     return web.json_response(t.public())
 
 
@@ -482,6 +511,22 @@ async def task_one(request):
     if t is None:
         raise json_error(web.HTTPNotFound, "no such task")
     return web.json_response(t.public())
+
+
+CONSOLES_PER_SESSION = 8
+
+
+@routes.get("/api/guests/{g}/console")
+@needs("viewer")
+async def guest_console(request):
+    """WebSocket. Viewing needs a viewer; taking the keyboard, an operator."""
+    from . import console
+    consoles = request.app[STATE]["consoles"]
+    if consoles.count(request["session"].token) >= CONSOLES_PER_SESSION:
+        raise json_error(web.HTTPTooManyRequests, "too many consoles open for this session")
+    cfg = guest_config(request)
+    can_type = ROLE_RANK[request["user"].role] >= ROLE_RANK["operator"]
+    return await console.serve(request, cfg, consoles, request.app[SESSIONS], can_type)
 
 
 @routes.get("/api/events")
@@ -531,6 +576,7 @@ async def sample_forever(app):
 
 async def end_streams(app):
     app[HUB].close_all()        # open pages would otherwise hold a shutdown for a minute
+    await app[STATE]["consoles"].close_all()
     await app[TASKS].close()
     app[STATE]["login_pool"].shutdown(wait=False)
 
@@ -577,7 +623,11 @@ def make_app(settings, conf, users=None, sampler=None, background=True):
         "login_pool": concurrent.futures.ThreadPoolExecutor(LOGIN_CHECKS, "login"),
         "names": known_names(conf),
         "net_cache": {},
+        "logins_inflight": {},
     }
+    from .console import Consoles
+    app[STATE]["consoles"] = Consoles(app[TASKS])
+    app[SESSIONS].on_end.append(app[STATE]["consoles"].end_session)
     for p in (conf.state_dir, conf.cert_path, conf.key_path, conf.users_path):
         if p not in data.PROTECTED:
             data.PROTECTED.append(p)

@@ -10,9 +10,18 @@ the page as root access to every guest.
   supervisor log, and the emulator config files the conf names (shown as
   written, so anything in them, a password included, is visible); the host's
   bridges and interfaces.
-- Act: start and stop guests through systemd. The polkit rule allows
+- Act: start and stop guests through systemd, and type at their consoles. The polkit rule allows
   `start`, `stop` and `kill` on `emuctl-guest@*.service` units only.
 - It cannot edit confs, run commands on the host, or read `/etc/emuctl/env/`.
+
+## The console
+
+A console opens watching: what you type is not sent until you press "Take
+keyboard". Only one person types at a time; taking the keyboard moves it,
+and the page says who has it. Every take and release is in the task log
+with the user's name. The page shows the guest's recent console output, so
+anything the guest printed (a password echoed by an old OS, say) is visible
+to everyone who can open the page.
 
 ## Who can use it
 
@@ -58,7 +67,9 @@ These are the rules every change to the web code follows (they are also in
    while guessing others. Over 60 failures a minute from everyone together
    makes every login wait.
 8. **Content-Security-Policy** allows scripts, styles, fonts and connections
-   from the daemon's own address only. The page loads nothing from the
+   from the daemon's own address only, with one exception: inline styles are
+   allowed, because xterm.js (the console) writes its colours into `<style>`
+   elements. Inline scripts are not. The page loads nothing from the
    internet; its third-party files (fonts, xterm.js) are in the package.
 9. **Every action is logged** with the user's name, in the task log (from
    0.3).

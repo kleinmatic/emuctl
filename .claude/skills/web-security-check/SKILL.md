@@ -24,7 +24,7 @@ optional for changes under `src/emuctl/web/`.
    | 5 | Is any subprocess started with a shell, or with a string built from input? Does anything add sudo back (`settings.elevate` must stay `none`)? | everywhere; `main.py` forces `elevate = none` |
    | 6 | Can any route read a file not named in a guest's conf, follow a symlink out, or reach `/etc/emuctl/env/`? Are reads bounded and non-blocking? | `data.safe_path`, `data.tail_bytes`, `hardware.read_config` |
    | 7 | Is the login limit still applied to every way of logging in, charged before the password check? | `app.py: login`, `auth.LoginLimiter` |
-   | 8 | Does the CSP still allow only the daemon's origin, with no `unsafe-*`? Does new front-end code need an inline style or script, or an outside URL? | `app.py: CSP`, `add_security_headers` |
+   | 8 | Does the CSP still allow only the daemon's origin, with `unsafe-inline` for styles only (xterm.js) and nothing unsafe for scripts? Does new front-end code need an inline script or an outside URL? | `app.py: CSP`, `add_security_headers` |
    | 9 | Does every new action write to the task log with the user's name? | `web/tasks.py` |
    | 10 | Is there a test that tries to break each rule the diff touches? | `tests/test_web_*.py` |
 

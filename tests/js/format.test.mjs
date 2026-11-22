@@ -46,3 +46,19 @@ test("graph maths", () => {
   assert.deepEqual(segs[0], ["0.0,80.0", "75.0,4.0"]);
   assert.deepEqual(f.segments([20], 10)[0], ["300.0,4.0"]);   // clipped to the top
 });
+
+import { slowSend } from "../../src/emuctl/web/static/js/keys.js";
+
+test("slow paste sends one character at a time and can stop", async () => {
+  const sent = [];
+  const waits = [];
+  const r = slowSend("ab\rc", 20, (c) => sent.push(c), async (ms) => { waits.push(ms); });
+  assert.equal(await r.done, 4);
+  assert.deepEqual(sent, ["a", "b", "\r", "c"]);
+  assert.deepEqual(waits, [20, 20, 20]);
+  const sent2 = [];
+  const box = {};
+  box.r = slowSend("abcdef", 5, (c) => sent2.push(c), async () => { await null; box.r.cancel(); });
+  assert.equal(await box.r.done, 1);
+  assert.equal((await slowSend("é😀", 0, () => {}).done), 2);   // by character, not byte
+});

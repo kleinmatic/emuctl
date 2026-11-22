@@ -22,6 +22,12 @@ SupplementaryGroups=systemd-journal
 ExecStart=/usr/local/bin/emuctl web serve
 Restart=on-failure
 RestartSec=5
+# On stop the daemon waits for start and stop tasks it is running, so a
+# guest's shutdown is never cut off half way. Only the daemon gets SIGTERM;
+# its `emuctl stop` children are left to finish. Longer than the longest
+# guest stop (emuctl-guest@'s TimeoutStopSec).
+KillMode=mixed
+TimeoutStopSec=480
 StateDirectory=emuctl-web
 StateDirectoryMode=0700
 LogsDirectory=emuctl

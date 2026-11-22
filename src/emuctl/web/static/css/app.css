@@ -224,3 +224,15 @@ table.tasklist td:last-child { width: 100%; }
 .res-running { color: var(--info); } .res-ok { color: var(--ok); } .res-bad { color: var(--bad); }
 .res-warn { color: var(--warn); } .res-muted { color: var(--muted); }
 #view { display: flex; flex-direction: column; flex: 1; }
+
+/* console */
+.console { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+.console-banner { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--note);
+  border: 1px solid var(--line); border-radius: 4px; flex-wrap: wrap; }
+.console-banner.typing { background: var(--sel); }
+.console-banner .btn { margin-left: auto; }
+.console .toolbar .spacer { flex: 1; }
+.terminal { flex: 1; min-height: 480px; background: var(--term-bg); border-radius: 4px; padding: 8px; }
+textarea { width: 100%; font-family: var(--mono); background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); border-radius: 3px; padding: 6px; margin: 6px 0 10px; }
+label.inline { display: flex; align-items: center; gap: 8px; color: var(--muted); }

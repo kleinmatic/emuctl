@@ -147,8 +147,11 @@ Runs `emuctl start <guest>`.
 
 Body `{"mode": "clean"}`, `{"mode": "force"}` or `{"mode": "now"}`, which
 run `emuctl stop`, `emuctl stop --force` and `emuctl stop --now`
-([stopping.md](stopping.md)). `force` and `now` are a power cut for the
-guest; the page asks before sending them.
+([stopping.md](stopping.md)). When the stop would be a power cut for the
+guest, the body must also say `"power_cut": true`, meaning the user was
+asked and agreed; otherwise the task is refused and nothing is done. The
+page always asks before `force` and `now`. A `force` without
+`power_cut: true` runs plain `emuctl stop`, which refuses a cut itself.
 
 ### `GET /api/tasks` (viewer)
 
@@ -160,6 +163,29 @@ console's keyboard).
 ### `GET /api/tasks/{id}` (viewer)
 
 One task with `output`: what the `emuctl` command printed, up to 200 lines.
+
+## The serial console
+
+### `WS /api/guests/{guest}/console` (viewer to watch, operator to type)
+
+A WebSocket to the guest's console broker. It needs the session cookie and an
+`Origin` header naming the daemon. On connect the daemon sends the last 64 KB
+of the guest's `console.log`, then live output.
+
+- Binary frames, both ways: console bytes. The daemon removes telnet
+  negotiation from what the guest sends and escapes `0xFF` in what the
+  browser sends.
+- Text frames from the browser: `{"type": "take"}` and
+  `{"type": "release"}` take and give back the keyboard. Until a socket holds
+  the keyboard, its binary frames are dropped. One socket per guest holds it;
+  taking it moves it from whoever had it. Each take and release is a task
+  (`note`).
+- Text frames from the daemon:
+  `{"type": "status", "typing": false, "typist": "bob", "viewers": 2,
+  "running": true, "message": ""}`, whenever any of that changes.
+
+The socket closes when the guest's console closes, on logout, or when the
+session ends. A session may have eight consoles open.
 
 ## Live updates
 

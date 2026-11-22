@@ -53,7 +53,8 @@ export function actionButtons(name, detail, onDone) {
       mode === "now"
         ? "The guest's own shutdown is skipped, or cut short if one is under way, and the emulator stops at once."
         : "The emulator stops without the guest OS being shut down first.",
-      ...(stop[mode] && stop[mode].message ? [stop[mode].message] : []),
+      ...(stop[mode] && stop[mode].message && !stop[mode].message.includes("power cut")
+        ? [stop[mode].message] : []),
     ],
     confirm: mode === "now" ? "Stop now" : "Stop",
   });
@@ -63,10 +64,10 @@ export function actionButtons(name, detail, onDone) {
   const menu = h("div", { class: "menu hidden", role: "menu" },
     h("button", { class: "item", type: "button", role: "menuitem", disabled: !(up && !stopping && stop.force && stop.force.allowed),
       text: "Stop (force)", title: "stop without shutting the guest OS down",
-      onclick: () => { menu.classList.add("hidden"); act("/stop", { mode: "force" }, stop.force && stop.force.power_cut ? cut("force") : null); } }),
+      onclick: () => { menu.classList.add("hidden"); act("/stop", { mode: "force", power_cut: true }, cut("force")); } }),
     h("button", { class: "item", type: "button", role: "menuitem", disabled: !(up && stop.now && stop.now.allowed),
       text: "Stop now", title: "skip or cut short the guest's shutdown",
-      onclick: () => { menu.classList.add("hidden"); act("/stop", { mode: "now" }, cut("now")); } }));
+      onclick: () => { menu.classList.add("hidden"); act("/stop", { mode: "now", power_cut: true }, cut("now")); } }));
   const toggle = h("button", { class: "btn", type: "button", "aria-haspopup": "menu", text: "Stop ▾",
     disabled: !up, title: up ? null : notRunning,
     onclick: (e) => { e.stopPropagation(); menu.classList.toggle("hidden"); } });

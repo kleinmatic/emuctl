@@ -2,7 +2,8 @@
 
 `emuctl web serve` runs a small web server that shows every guest on the
 host: its state, CPU, memory, disk and network use over the last hour, its
-emulated hardware, the host's bridges, and the logs. It needs Linux with
+emulated hardware, the host's bridges, and the logs. From it you can start
+and stop guests and use their serial consoles. It needs Linux with
 systemd (see [platforms.md](platforms.md)), Python 3.11 or newer, and
 `aiohttp`.
 

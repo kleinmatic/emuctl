@@ -6,6 +6,7 @@ import re
 import socket
 import stat
 import subprocess
+import threading
 
 from .. import actions, full_version, hardware, service
 from ..config import ConfigError, load_config
@@ -267,6 +268,8 @@ def supervisor_log(settings, name, lines, run=None):
     except OSError as exc:
         return f"could not read the log: {exc}"
     buf, total = bytearray(), 0
+    timer = threading.Timer(15, proc.kill)     # a hung journalctl gives up after 15 s
+    timer.start()
     try:
         while True:
             chunk = proc.stdout.read(65536)
@@ -278,6 +281,7 @@ def supervisor_log(settings, name, lines, run=None):
             if total > MAX_JOURNAL:
                 break
     finally:
+        timer.cancel()
         proc.kill()
         proc.wait()
     return clean_text(bytes(buf))
