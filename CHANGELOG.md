@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-11-22)
 
 - `emuctl start` no longer reports `crashed` straight away when the previous
   run had crashed; it waits for the new run's own state.
