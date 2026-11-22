@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
 #
-# Install emuctl without pip. emuctl needs only Python 3.9+ and its standard
+# Install emuctl without pip. emuctl needs only Python 3.10+ and its standard
 # library, so this copies the package and writes a launcher.
 #
 #   sudo ./install.sh              install under /usr/local
@@ -38,8 +38,8 @@ command -v "$PYTHON" >/dev/null || { echo "install.sh: $PYTHON not found" >&2; e
 # The launcher names the interpreter by full path: service managers run with a
 # short PATH that may not include it.
 PYTHON=$(command -v "$PYTHON")
-"$PYTHON" -c 'import sys; sys.exit(sys.version_info < (3, 9))' ||
-    { echo "install.sh: Python 3.9 or newer is required" >&2; exit 1; }
+"$PYTHON" -c 'import sys; sys.exit(sys.version_info < (3, 10))' ||
+    { echo "install.sh: Python 3.10 or newer is required" >&2; exit 1; }
 
 rm -rf "$lib"
 mkdir -p "$lib" "$PREFIX/bin" "$etc/guests"

@@ -42,7 +42,7 @@ emuctl doesn't install emulators, create disk images, or set up networking.
 
 ## Requirements
 
-- Python 3.9 or newer. No other packages.
+- Python 3.10 or newer. No other packages.
 - Linux with systemd, or FreeBSD.
 
 ## Install

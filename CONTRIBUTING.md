@@ -18,7 +18,7 @@ paths are exercised end to end. Tests run on Linux and FreeBSD.
 
 - The runtime uses the Python standard library only. It runs as a system
   service on hosts where installing packages is unwelcome.
-- Python 3.9 is the oldest supported version.
+- Python 3.10 is the oldest supported version.
 - A change to supervisor behaviour comes with a test against the fake
   emulator.
 - Nothing about a particular host belongs in the code: paths, names and

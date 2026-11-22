@@ -7,7 +7,7 @@ name = "emuctl"
 version = "0.1.0"
 description = "Run emulated machines (SIMH, es40, QEMU and others) as services: console broker, boot driving, guest state"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "GPL-2.0-only" }
 keywords = ["emulator", "simh", "es40", "qemu", "retrocomputing", "console"]
 classifiers = [
