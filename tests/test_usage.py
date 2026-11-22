@@ -144,13 +144,24 @@ def test_human_bytes():
 
 
 def test_table_with_usage_columns():
-    row = {"name": "g1", "node": "g1", "os": "", "emulator": "", "state": "ready",
+    row = {"name": "g1", "node": "g1", "os": "Some OS", "emulator": "emu 1.0", "state": "ready",
            "uptime": 65, "detail": "", "cpu_pct": 7.25, "mem_bytes": 2 * 1024 ** 2}
     down = dict(row, name="g2", state="down", uptime=None, cpu_pct=None, mem_bytes=None)
     out = format_table([row, down], usage=True).splitlines()
-    assert out[0].split()[:5] == ["GUEST", "NODE", "STATE", "UPTIME", "CPU%"]
-    assert "7.2" in out[1] and "2.0M" in out[1]
-    assert out[2].split()[3:5] == ["-", "-"]
+    assert out[0].split() == ["GUEST", "STATE", "UPTIME", "CPU%", "MEM"]
+    assert "7.2" in out[1] and "2.0M" in out[1] and "Some OS" not in out[1]
+    assert out[2].split()[1:] == ["down", "-", "-", "-"]
+    plain = format_table([row, down])
+    assert "NODE" in plain and "Some OS" in plain and "emu 1.0" in plain
+
+
+def test_usage_table_fits_80_columns():
+    row = {"name": "a-rather-long-guest-name", "node": "N", "os": "O", "emulator": "E",
+           "state": "degraded", "uptime": 200000, "cpu_pct": 100.0, "mem_bytes": 3 * 1024 ** 3,
+           "detail": "192.168.100.100:23 does not answer and this detail goes on and on"}
+    out = format_table([row], usage=True).splitlines()
+    assert all(len(line) <= 80 for line in out)
+    assert out[1].endswith("…") and "degraded" in out[1]
 
 
 def test_unit_turns_accounting_on():

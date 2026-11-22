@@ -14,6 +14,9 @@ ultrix-vax  ready  2d04h    3.1    61.0M
 tru64       down   -        -      -
 ```
 
+To fit 80 columns, `--usage` leaves out the NODE, OS and EMULATOR columns
+that plain `emuctl list` shows, and cuts DETAIL short if it has to.
+
 | Field (`--json`) | Column | Meaning | Source |
 |---|---|---|---|
 | `cpu_seconds` | | CPU time used since the guest started, in seconds | `cpu.stat` in the guest's cgroup |
