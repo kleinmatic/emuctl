@@ -43,7 +43,8 @@ emuctl doesn't install emulators, create disk images, or set up networking.
 ## Requirements
 
 - Python 3.10 or newer. No other packages.
-- Linux with systemd, or FreeBSD.
+- Linux with systemd; Debian 13 is the reference system. The core also runs on
+  FreeBSD. See [docs/platforms.md](docs/platforms.md).
 
 ## Install
 
@@ -71,6 +72,7 @@ To try it without a real emulator, see [docs/quickstart.md](docs/quickstart.md).
 - [Networking](docs/networking.md)
 - [Design](docs/design.md): why it works this way
 - [Versions and releases](docs/releasing.md)
+- [Supported platforms](docs/platforms.md)
 
 ## Other tools
 

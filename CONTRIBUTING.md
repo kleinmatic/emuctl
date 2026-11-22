@@ -12,7 +12,7 @@ for one: it serves a firmware prompt, boots, halts, and can be told to drop
 its console client, ignore SIGTERM or die, which is how the supervisor's
 paths are exercised end to end. Tests run on Linux and FreeBSD.
 
-`ruff check src tests tools` should pass.
+`ruff check src tests tools tools/devhost` should pass.
 
 ## Rules for changes
 

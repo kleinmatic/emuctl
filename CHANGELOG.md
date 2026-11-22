@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Linux with systemd is the supported platform, Debian 13 the reference;
+  the core keeps running on FreeBSD (docs/platforms.md).
+- `tools/devhost`: a throwaway host with four fake guests for trying emuctl
+  without an emulator or root.
+
 ## 0.1.0 (2026-11-22)
 
 First public version.

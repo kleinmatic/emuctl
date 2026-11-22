@@ -16,6 +16,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install pytest ruff
-      - run: ruff check src tests tools
-      - run: python -m pytest -q
+      - run: python -m pip install pytest pytest-cov ruff
+      - run: ruff check src tests tools tools/devhost
+      - run: python -m pytest -q --cov=emuctl --cov-report=json --cov-report=term
+      - run: python tools/coverage_check.py coverage.json

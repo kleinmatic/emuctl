@@ -19,7 +19,7 @@ before anything is published.
 3. Check the Unreleased section covers every user-visible change in those
    commits. Add missing lines, in plain English.
 4. Rename `## Unreleased` to `## X.Y.Z (YYYY-MM-DD)` and set `__version__`.
-5. Run `python3 -m pytest -q`, `ruff check src tests tools`, and
+5. Run `python3 -m pytest -q`, `ruff check src tests tools tools/devhost`, and
    `python3 tools/release_check.py vX.Y.Z`. All three must pass.
 6. Commit `Release X.Y.Z`. **Stop.** Do not tag and do not push. Report the
    version, the reason for it, and the release notes, and ask the maintainer

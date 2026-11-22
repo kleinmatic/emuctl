@@ -5,6 +5,11 @@ uses (`tests/fake_emulator.py`). It prints a firmware prompt, boots when told
 to, and halts on `shutdown`, which is enough to see every part of emuctl work.
 Nothing here needs root. Run it from a clone of the repository.
 
+If you only want to try emuctl, or are working on it, `tools/devhost` does
+steps 1 to 3 for you with four ready-made fake guests:
+`eval "$(tools/devhost up)"`, then `emuctl list`. The steps below show what it
+sets up.
+
 ## 1. A private place for confs and state
 
 ```sh

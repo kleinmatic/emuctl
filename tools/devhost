@@ -1,0 +1,278 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
+"""A throwaway emuctl host with fake guests, for trying changes by hand.
+
+    eval "$(tools/devhost up)"       make one (default dir: $TMPDIR/emuctl-devhost)
+    emuctl list                      the four fake guests
+    emuctl start vax --wait
+    emuctl console vax               Ctrl-] detaches
+    emuctl stop vax
+    tools/devhost down               stop every guest and delete the directory
+
+Needs no root and no emulator. The guests run tests/fake_emulator.py. The
+`systemctl` and `journalctl` on the printed PATH are this script under other
+names: they start `emuctl supervise <guest>` in the background, stop it with
+SIGTERM the way systemd does, and show its log.
+
+`up` prints shell exports; `env` prints them again for an existing directory.
+"""
+import json
+import os
+import signal
+import socket
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+FAKE = os.path.join(ROOT, "tests", "fake_emulator.py")
+UNIT_PREFIX, UNIT_SUFFIX = "emuctl-guest@", ".service"
+STOP_WAIT = 120     # seconds; systemd's TimeoutStopSec plays this part on a real host
+
+# name: (os label, emulator label, fake_emulator options, extra conf lines)
+GUESTS = {
+    "vax": ("Fake VMS 1.0", "fake 1.0", "",
+            "boot.1 = >>> | boot\nhalted = >>>\nstop.1 = login: | shutdown\n"),
+    "alpha": ("Fake UNIX 2.0", "fake 1.0", "--self-boot", ""),
+    "stuck": ("Fake OS 3.0", "fake 1.0", "--self-boot --stuck 'Enter date and time:'",
+              "stuck.1 = Enter date and time\n"),
+    "twin": ("Fake VMS 1.0 (copy)", "fake 1.0", "",
+             "boot.1 = >>> | boot\nhalted = >>>\nstop.1 = login: | shutdown\n"
+             "exclusive_with = vax\n"),
+}
+
+
+def default_dir():
+    return os.path.join(os.environ.get("TMPDIR", "/tmp"), "emuctl-devhost")
+
+
+def free_ports(n):
+    socks = [socket.socket() for _ in range(n)]
+    for s in socks:
+        s.bind(("127.0.0.1", 0))
+    ports = [s.getsockname()[1] for s in socks]
+    for s in socks:
+        s.close()
+    return ports
+
+
+def env_lines(d):
+    return [
+        f"export EMUCTL_CONF={d}/emuctl.conf",
+        f"export EMUCTL_GUEST_DIR={d}/guests",
+        f"export EMUCTL_RUN_DIR={d}/run",
+        "export EMUCTL_SERVICE=systemd",
+        "export EMUCTL_ELEVATE=none",
+        f"export EMUCTL_DEVHOST={d}",
+        f'export PATH="{d}/bin:$PATH"',
+    ]
+
+
+def guest_conf(d, name, ports):
+    os_label, emu, fake_args, extra = GUESTS[name]
+    work = os.path.join(d, "work", name)
+    os.makedirs(work, exist_ok=True)
+    open(os.path.join(work, "disk.img"), "ab").close()
+    broker, s1, s2 = ports
+    return (f"name = {name}\nos = {os_label}\nemulator = {emu}\n"
+            f"workdir = {work}\n"
+            f"command = {sys.executable} {FAKE} --serial {s1} --serial {s2} {fake_args}\n"
+            f"disks = disk.img\nserials = {s1},{s2}\nbroker = {broker}\n"
+            f"ready = login:\nboot_timeout = 60\nconsole_timeout = 20\nstop_timeout = 20\n"
+            + extra)
+
+
+def cmd_up(d):
+    if os.path.exists(os.path.join(d, "guests")):
+        sys.stderr.write(f"devhost: {d} already exists; using it (`devhost down` removes it)\n")
+    else:
+        for sub in ("guests", "run", "bin", "logs", "work"):
+            os.makedirs(os.path.join(d, sub), exist_ok=True)
+        open(os.path.join(d, "emuctl.conf"), "w").close()
+        ports = free_ports(3 * len(GUESTS))
+        for i, name in enumerate(GUESTS):
+            with open(os.path.join(d, "guests", f"{name}.conf"), "w") as fh:
+                fh.write(guest_conf(d, name, ports[3 * i:3 * i + 3]))
+        launcher = os.path.join(d, "bin", "emuctl")
+        with open(launcher, "w") as fh:
+            fh.write(f'#!/bin/sh\nPYTHONPATH="{ROOT}/src${{PYTHONPATH:+:$PYTHONPATH}}" '
+                     f'exec {sys.executable} -m emuctl.cli "$@"\n')
+        os.chmod(launcher, 0o755)
+        for tool in ("systemctl", "journalctl"):
+            os.symlink(os.path.abspath(__file__), os.path.join(d, "bin", tool))
+    print("\n".join(env_lines(d)))
+    return 0
+
+
+def supervisors(d):
+    """{guest: pid} for supervisors this devhost started that are still alive."""
+    out = {}
+    run = os.path.join(d, "run")
+    for f in os.listdir(run) if os.path.isdir(run) else []:
+        if f.endswith(".svc.pid"):
+            try:
+                pid = int(open(os.path.join(run, f)).read())
+                os.kill(pid, 0)
+                out[f[:-8]] = pid
+            except (OSError, ValueError):
+                pass
+    return out
+
+
+def cmd_down(d):
+    if not os.path.isdir(os.path.join(d, "guests")):
+        sys.stderr.write(f"devhost: no devhost at {d}\n")
+        return 1
+    for name in supervisors(d):
+        sc_stop(d, name)
+    subprocess.run(["rm", "-rf", "--", d], check=True)
+    print(f"removed {d}")
+    return 0
+
+
+# --- the stand-in systemctl and journalctl ----------------------------------
+
+def unit_guest(unit):
+    if not (unit.startswith(UNIT_PREFIX) and unit.endswith(UNIT_SUFFIX)):
+        raise SystemExit(f"devhost systemctl: only {UNIT_PREFIX}<guest>{UNIT_SUFFIX} "
+                         f"units exist here")
+    return unit[len(UNIT_PREFIX):-len(UNIT_SUFFIX)]
+
+
+def pidfile(d, name):
+    return os.path.join(d, "run", f"{name}.svc.pid")
+
+
+def sc_start(d, name):
+    if name in supervisors(d):
+        return 0
+    if not os.path.exists(os.path.join(d, "guests", f"{name}.conf")):
+        sys.stderr.write(f"Failed to start {UNIT_PREFIX}{name}{UNIT_SUFFIX}: Unit not found.\n")
+        return 5
+    log = open(os.path.join(d, "logs", f"{name}.log"), "ab")
+    env = dict(os.environ, PYTHONUNBUFFERED="1")
+    proc = subprocess.Popen([os.path.join(d, "bin", "emuctl"), "supervise", name],
+                            stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                            env=env, start_new_session=True)
+    with open(pidfile(d, name), "w") as fh:
+        fh.write(str(proc.pid))
+    return 0
+
+
+def sc_stop(d, name):
+    pid = supervisors(d).get(name)
+    if not pid:
+        return 0
+    os.kill(pid, signal.SIGTERM)
+    deadline = time.time() + STOP_WAIT
+    while time.time() < deadline:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            break
+        try:                            # reap it if it is our child (it never is, but cheap)
+            os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            pass
+        time.sleep(0.2)
+    else:
+        os.killpg(pid, signal.SIGKILL)
+    try:
+        os.unlink(pidfile(d, name))
+    except OSError:
+        pass
+    return 0
+
+
+def systemctl(d, args):
+    args = [a for a in args if a not in ("--no-pager", "--quiet", "-q")]
+    if not args:
+        raise SystemExit("devhost systemctl: no verb")
+    verb, rest = args[0], args[1:]
+    if verb in ("start", "stop", "is-active"):
+        if not rest:
+            raise SystemExit(f"devhost systemctl {verb}: no unit")
+        name = unit_guest(rest[0])
+        if verb == "start":
+            return sc_start(d, name)
+        if verb == "stop":
+            return sc_stop(d, name)
+        up = name in supervisors(d)
+        print("active" if up else "inactive")
+        return 0 if up else 3
+    if verb == "kill":
+        sig, whom, units = "TERM", "all", []
+        it = iter(rest)
+        for a in it:
+            if a in ("-s", "--signal"):
+                sig = next(it)
+            elif a.startswith("--signal="):
+                sig = a.split("=", 1)[1]
+            elif a.startswith("--kill-whom="):
+                whom = a.split("=", 1)[1]
+            else:
+                units.append(a)
+        for unit in units:
+            pid = supervisors(d).get(unit_guest(unit))
+            if pid:
+                signum = getattr(signal, "SIG" + sig.upper().removeprefix("SIG"))
+                (os.kill if whom == "main" else os.killpg)(pid, signum)
+        return 0
+    if verb == "show":
+        # Enough for `systemctl show -p ControlGroup <unit>`: a devhost has no
+        # cgroup of its own, so report none, as a host without systemd would.
+        props = [rest[i + 1] for i, a in enumerate(rest) if a == "-p" and i + 1 < len(rest)]
+        for p in ",".join(props).split(","):
+            if p:
+                print(f"{p}=")
+        return 0
+    if verb == "list-units":
+        print(json.dumps(sorted(supervisors(d))))
+        return 0
+    sys.stderr.write(f"devhost systemctl: '{verb}' is not supported here\n")
+    return 1
+
+
+def journalctl(d, args):
+    unit, lines, follow = None, 60, False
+    it = iter(args)
+    for a in it:
+        if a == "-u":
+            unit = next(it)
+        elif a == "-n":
+            lines = int(next(it))
+        elif a == "-f":
+            follow = True
+    if not unit:
+        raise SystemExit("devhost journalctl: needs -u <unit>")
+    log = os.path.join(d, "logs", f"{unit_guest(unit)}.log")
+    if not os.path.exists(log):
+        print("-- No entries --")
+        return 0
+    argv = ["tail", "-n", str(lines)] + (["-f"] if follow else []) + [log]
+    os.execvp("tail", argv)
+
+
+def main(argv):
+    me = os.path.basename(argv[0])
+    if me in ("systemctl", "journalctl"):
+        d = os.path.dirname(os.path.dirname(os.path.abspath(argv[0])))
+        return (systemctl if me == "systemctl" else journalctl)(d, argv[1:])
+    if len(argv) < 2 or argv[1] not in ("up", "down", "env"):
+        sys.stderr.write(__doc__)
+        return 2
+    d = os.path.abspath(argv[2]) if len(argv) > 2 else default_dir()
+    if argv[1] == "up":
+        return cmd_up(d)
+    if argv[1] == "down":
+        return cmd_down(d)
+    if not os.path.isdir(os.path.join(d, "guests")):
+        sys.stderr.write(f"devhost: no devhost at {d}; run `devhost up` first\n")
+        return 1
+    print("\n".join(env_lines(d)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
