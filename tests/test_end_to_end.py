@@ -143,6 +143,14 @@ def test_halt_grace_waits_after_the_halted_prompt(guest, capsys):
     assert out.index("waiting 1s (halt_grace)") > out.index("reached its halted prompt")
 
 
+def test_boot_stage_with_an_unset_variable_does_not_kill_the_supervisor(guest):
+    g = guest(extra="boot.1 = >>> | ${EMUCTL_TEST_UNSET_VAR}\n").start()
+    time.sleep(2)
+    assert g.thread.is_alive()
+    assert g.state() in ("booting", "starting")
+    g.stop()
+
+
 def test_stop_command_can_use_the_broker(guest, tmp_path):
     hook = tmp_path / "hook.py"
     hook.write_text(

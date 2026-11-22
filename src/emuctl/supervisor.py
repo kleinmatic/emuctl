@@ -336,8 +336,11 @@ class Supervisor:
             if cmd:
                 time.sleep(1)
                 # Log the command as written in the conf, never its expansion.
-                self.send_console(expand(cmd, self.stage_env).encode() + b"\r")
-                self.note(f"sent: {cmd}")
+                try:
+                    self.send_console(expand(cmd, self.stage_env).encode() + b"\r")
+                    self.note(f"sent: {cmd}")
+                except KeyError as exc:
+                    log(f"stage not sent: {cmd!r} uses {exc}, which is not set")
             if self.state not in ("stopping",):
                 self.judge()
 

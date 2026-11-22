@@ -36,7 +36,12 @@ In the command half of a `boot.<n>` or `stop.<n>` stage, `${NAME}` is replaced
 with the environment variable `NAME` from the supervisor's environment. Use it
 for a password, so the password lives in a root-only file and not in the conf.
 The log shows the stage as written, never the value. If a stop stage names a
-variable that is not set, emuctl skips the whole stop sequence and says so.
+variable that is not set, emuctl skips the whole stop sequence and says so. A
+boot stage with an unset variable is logged and not sent.
+
+The value is typed at the guest's console, and anything the guest echoes back
+goes into `console.log` and to everyone watching the console. Use a variable
+only at a prompt that does not echo, such as `Password:`.
 
 ## Stopping
 
