@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 
-from . import __version__, guard, service, supervisor
+from . import full_version, guard, service, supervisor
 from .config import ConfigError, load_config
 from .settings import SettingsError, load_settings
 from .state import effective_state, read_state
@@ -287,7 +287,7 @@ def cmd_supervise(settings, args):
 def build_parser():
     p = argparse.ArgumentParser(
         prog="emuctl", description="Run emulated machines as services.")
-    p.add_argument("--version", action="version", version=f"emuctl {__version__}")
+    p.add_argument("--version", action="version", version=f"emuctl {full_version()}")
     sub = p.add_subparsers(dest="command", metavar="command")
 
     s = sub.add_parser("list", help="every guest and what it is doing")

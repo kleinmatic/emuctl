@@ -54,7 +54,9 @@ sudo ./install.sh
 ```
 
 This installs the `emuctl` command in `/usr/local/bin` and a service file for
-your system. `pip install .` works too.
+your system. `pip install .` works too. Released versions are on the
+[releases page](https://github.com/kleinmatic/emuctl/releases); `main` is the
+development version.
 
 To try it without a real emulator, see [docs/quickstart.md](docs/quickstart.md).
 
@@ -68,6 +70,7 @@ To try it without a real emulator, see [docs/quickstart.md](docs/quickstart.md).
   [QEMU](docs/emulators/qemu.md), [gxemul](docs/emulators/gxemul.md)
 - [Networking](docs/networking.md)
 - [Design](docs/design.md): why it works this way
+- [Versions and releases](docs/releasing.md)
 
 ## Other tools
 

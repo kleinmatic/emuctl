@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-11-22)
 
 First public version.
 
@@ -18,3 +18,5 @@ First public version.
   `emuctl start` runs the checks itself and reports a refusal.
 - systemd template unit and FreeBSD rc.d script; `install.sh` for installing without pip.
   `elevate = mdo` for FreeBSD hosts without sudo.
+- `emuctl --version` shows the git commit when installed from a checkout with
+  `install.sh`. Releases are made by tag; see docs/releasing.md.

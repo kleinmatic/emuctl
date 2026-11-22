@@ -45,6 +45,14 @@ rm -rf "$lib"
 mkdir -p "$lib" "$PREFIX/bin" "$etc/guests"
 cp -R "$here/src/emuctl" "$lib/"
 find "$lib" -name __pycache__ -type d -prune -exec rm -rf {} +
+rm -f "$lib/emuctl/BUILD"
+# Record the commit when installing from a git checkout, so `emuctl --version`
+# says which build this is. safe.directory: under sudo, git refuses a checkout
+# owned by another user.
+if commit=$(git -c safe.directory="$here" -C "$here" rev-parse --short HEAD 2>/dev/null); then
+    git -c safe.directory="$here" -C "$here" diff --quiet HEAD 2>/dev/null || commit="$commit-dirty"
+    echo "$commit" > "$lib/emuctl/BUILD"
+fi
 rm -f "$bin"
 cat > "$bin" <<LAUNCHER
 #!/bin/sh

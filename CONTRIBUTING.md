@@ -12,7 +12,7 @@ for one: it serves a firmware prompt, boots, halts, and can be told to drop
 its console client, ignore SIGTERM or die, which is how the supervisor's
 paths are exercised end to end. Tests run on Linux and FreeBSD.
 
-`ruff check src tests` should pass.
+`ruff check src tests tools` should pass.
 
 ## Rules for changes
 
@@ -25,6 +25,14 @@ paths are exercised end to end. Tests run on Linux and FreeBSD.
   addresses come from `emuctl.conf`, the environment or the guest's conf.
 - If a real emulator behaves differently from what the docs say, the version
   and the observed behaviour are the useful parts of a bug report.
+
+## The changelog and versions
+
+A change a user could notice adds a line to the `## Unreleased` section of
+`CHANGELOG.md` in the same commit. A change that could break someone's setup
+(a renamed command, conf key or `--json` field) also goes under
+`### Breaking`. Version numbers and releases are explained in
+[docs/releasing.md](docs/releasing.md); only the maintainer tags a release.
 
 ## License
 
