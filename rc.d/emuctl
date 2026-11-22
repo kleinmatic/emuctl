@@ -1,0 +1,125 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# PROVIDE: emuctl
+# REQUIRE: NETWORKING DAEMON LOGIN
+# KEYWORD: shutdown
+#
+# emuctl guests under FreeBSD rc.d. Guest names follow the command:
+#
+#   service emuctl onestart pdp11        start one guest
+#   service emuctl onestop  pdp11        stop it
+#   service emuctl stop                  stop every running guest (host shutdown)
+#
+# rc.conf variables:
+#   emuctl_enable   (NO)      YES starts the guests in emuctl_guests at boot
+#   emuctl_guests   ()        guests to start at boot
+#   emuctl_user     (emuctl)  account the supervisors run as
+#   emuctl_program  (/usr/local/bin/emuctl)
+#   emuctl_rundir   (/var/run/emuctl)
+#   emuctl_prestart ()        command run as root before each start, given the
+#                             guest name; for chown of /dev/tapN and the like
+#   emuctl_stop_wait (420)    seconds to wait for a supervisor to finish
+
+. /etc/rc.subr
+
+name=emuctl
+rcvar=emuctl_enable
+desc="emulated guests under emuctl"
+
+load_rc_config $name
+: ${emuctl_enable:=NO}
+: ${emuctl_guests:=}
+: ${emuctl_user:=emuctl}
+: ${emuctl_program:=/usr/local/bin/emuctl}
+: ${emuctl_rundir:=/var/run/emuctl}
+: ${emuctl_prestart:=}
+: ${emuctl_stop_wait:=420}
+
+_cmd="$1"
+[ $# -gt 0 ] && shift
+_named="$*"
+
+emuctl_running()
+{
+    for _f in "${emuctl_rundir}"/*.pid; do
+        [ -s "${_f}" ] || continue
+        _g=$(basename "${_f}" .pid)
+        kill -0 "$(cat "${_f}")" 2>/dev/null && echo "${_g}"
+    done
+}
+
+emuctl_start()
+{
+    _guests="${_named:-${emuctl_guests}}"
+    [ -n "${_guests}" ] || { echo "emuctl: name a guest, or set emuctl_guests"; return 1; }
+    install -d -o "${emuctl_user}" -m 0755 "${emuctl_rundir}"
+    _rc=0
+    for _g in ${_guests}; do
+        _pidf="${emuctl_rundir}/${_g}.pid"
+        if [ -s "${_pidf}" ] && kill -0 "$(cat "${_pidf}")" 2>/dev/null; then
+            echo "${_g}: already running"
+            continue
+        fi
+        if [ -n "${emuctl_prestart}" ]; then
+            ${emuctl_prestart} "${_g}" || { echo "${_g}: prestart failed"; _rc=1; continue; }
+        fi
+        touch "/var/log/emuctl-${_g}.log"
+        chown "${emuctl_user}" "/var/log/emuctl-${_g}.log"
+        # -p records the supervisor's own pid, which is the one to signal;
+        # -P would record daemon(8)'s wrapper.
+        /usr/sbin/daemon -f -u "${emuctl_user}" -p "${_pidf}" \
+            -o "/var/log/emuctl-${_g}.log" \
+            /usr/bin/env EMUCTL_RUN_DIR="${emuctl_rundir}" \
+            "${emuctl_program}" supervise "${_g}" || _rc=1
+        echo "${_g}: starting"
+    done
+    return ${_rc}
+}
+
+emuctl_stop()
+{
+    _guests="${_named:-$(emuctl_running)}"
+    for _g in ${_guests}; do
+        _pidf="${emuctl_rundir}/${_g}.pid"
+        if [ ! -s "${_pidf}" ] || ! kill -0 "$(cat "${_pidf}")" 2>/dev/null; then
+            echo "${_g}: not running"
+            rm -f "${_pidf}"
+            continue
+        fi
+        _pid=$(cat "${_pidf}")
+        echo "${_g}: stopping (supervisor pid ${_pid})"
+        kill -TERM "${_pid}"
+        _n=0
+        while kill -0 "${_pid}" 2>/dev/null; do
+            _n=$((_n + 1))
+            if [ ${_n} -gt "${emuctl_stop_wait}" ]; then
+                echo "${_g}: supervisor did not finish; sending a second TERM"
+                kill -TERM "${_pid}"
+                sleep 90
+                break
+            fi
+            sleep 1
+        done
+        rm -f "${_pidf}"
+    done
+}
+
+emuctl_status()
+{
+    EMUCTL_RUN_DIR="${emuctl_rundir}" "${emuctl_program}" list
+}
+
+start_cmd=emuctl_start
+stop_cmd=emuctl_stop
+status_cmd=emuctl_status
+extra_commands="status"
+
+# A guest started by hand with `onestart` must still be stopped at host
+# shutdown, when rc runs `stop` with emuctl_enable=NO. (rc_force does not help:
+# run_rc_command resets it.)
+case "${_cmd}" in
+    stop|faststop) emuctl_enable=YES ;;
+esac
+
+run_rc_command "${_cmd}"

@@ -1,0 +1,35 @@
+# emuctl guest template. One instance per guest: emuctl-guest@<name>.service
+# runs the supervisor for /etc/emuctl/guests/<name>.conf.
+#
+# Adjust for your host with a drop-in (systemctl edit emuctl-guest@.service),
+# not by editing this file:
+#   - User/Group: the account that owns the guest's workdir and disk images.
+#   - ExecStart: the path `emuctl` was installed to.
+#   - After/Wants: whatever creates the guest's tap or bridge, if anything.
+[Unit]
+Description=emuctl guest %i
+Documentation=https://github.com/kleinmatic/emuctl
+After=network.target
+
+[Service]
+Type=simple
+User=emuctl
+Group=emuctl
+ExecStart=/usr/local/bin/emuctl supervise %i
+# Optional per-guest environment for the emulator or a stop_command, for
+# example a password. Root-readable only; never in the guest's .conf.
+EnvironmentFile=-/etc/emuctl/env/%i.env
+# State files live in /run/emuctl. Every instance shares the directory, so it
+# must survive one instance stopping.
+RuntimeDirectory=emuctl
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+# The supervisor handles SIGTERM: it shuts the guest down if the conf says how,
+# then stops the emulator. Keep this longer than the largest stop_timeout plus
+# a minute.
+KillMode=mixed
+TimeoutStopSec=420
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
