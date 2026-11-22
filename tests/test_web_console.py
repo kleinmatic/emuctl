@@ -154,6 +154,7 @@ async def test_one_typist_at_a_time(site):
     b = await open_console(c, bob)
     await recv_until(a, b"login: ")
     await recv_until(b, b"login: ")
+    await asyncio.sleep(0.1)
     await a.send_str(json.dumps({"type": "take"}))
     while not (await status(a))["typing"]:
         pass
@@ -187,7 +188,7 @@ async def test_the_console_closing_is_reported(site):
             seen.append(json.loads(msg.data))
         elif msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.CLOSING):
             break
-    assert any(s["running"] is False for s in seen) or ws.closed
+    assert any(s["running"] is False and s["message"] == "the console closed" for s in seen)
 
 
 async def test_a_guest_that_is_not_running(site, settings, tmp_path):
@@ -265,3 +266,121 @@ async def test_a_watcher_cannot_take_the_keyboard(site, monkeypatch):
 
 def test_escape_iac():
     assert console.escape_iac(b"a\xffb") == b"a\xff\xffb"
+
+
+async def test_guest_bytes_pass_through_unchanged(site):
+    c, broker = site
+    ws = await open_console(c, await session(c))
+    await recv_until(ws, b"login: ")
+    await broker.say(b"A\xff\xfdBC\xffDE!")
+    got, _ = await recv_until(ws, b"DE!")
+    assert b"A\xff\xfdBC\xffDE!" in got
+    await ws.close()
+
+
+async def test_a_flood_of_takes_is_limited(site):
+    c, _ = site
+    ws = await open_console(c, await session(c))
+    await recv_until(ws, b"login: ")
+    for _ in range(50):
+        await ws.send_str(json.dumps({"type": "take"}))
+        await ws.send_str(json.dumps({"type": "release"}))
+    await asyncio.sleep(0.5)
+    notes = [t for t in c.app[webapp.TASKS].list() if t["action"] == "console"]
+    assert len(notes) <= 6
+    await ws.close()
+
+
+async def test_logout_frees_the_keyboard_at_once(site):
+    c, broker = site
+    h = await session(c)
+    ws = await open_console(c, h)
+    await recv_until(ws, b"login: ")
+    await ws.send_str(json.dumps({"type": "take"}))
+    while not (await status(ws))["typing"]:
+        pass
+    await c.post("/api/logout", headers=h)
+    assert c.app[webapp.STATE]["consoles"].rooms.get("g1") is None or \
+        c.app[webapp.STATE]["consoles"].rooms["g1"].typist is None
+    for _ in range(50):
+        if not c.app[webapp.STATE]["consoles"].handlers:
+            break
+        await asyncio.sleep(0.05)
+    assert not c.app[webapp.STATE]["consoles"].handlers
+    msgs = [t["message"] for t in c.app[webapp.TASKS].list() if t["action"] == "console"]
+    assert any("left the page" in m for m in msgs)
+
+
+async def test_close_all_does_not_wait_for_a_stalled_page(site):
+    c, _ = site
+    ws = await open_console(c, await session(c))
+    await recv_until(ws, b"login: ")
+    consoles = c.app[webapp.STATE]["consoles"]
+    await asyncio.wait_for(consoles.close_all(), 6)
+    assert not consoles.handlers
+
+
+class FakeWS:
+    def __init__(self, stall=False):
+        self.stall, self.sent, self.closed = stall, [], False
+
+    async def send_str(self, text):
+        if self.stall:
+            await asyncio.sleep(60)
+        self.sent.append(text)
+
+    async def send_bytes(self, data):
+        self.sent.append(data)
+
+    async def close(self, **kw):
+        self.closed = True
+
+
+class FakeTransport:
+    aborted = False
+
+    def abort(self):
+        self.aborted = True
+
+
+async def test_a_stalled_viewer_is_cut_off(monkeypatch):
+    monkeypatch.setattr(console, "SEND_TIMEOUT", 0.1)
+    consoles = console.Consoles(tasks=None)
+    room = consoles.room("g1")
+    good, bad = FakeWS(), FakeWS(stall=True)
+    room.viewers = [(good, "alice"), (bad, "bob")]
+    room.typist = bad
+    transport = FakeTransport()
+    handler = asyncio.ensure_future(asyncio.sleep(60))
+    consoles.handlers[bad] = (handler, "g1", transport)
+    await consoles.broadcast("g1")
+    assert good.sent and transport.aborted and room.typist is None and bad in consoles.dropped
+    await asyncio.sleep(0)
+    assert handler.cancelled()
+
+
+async def test_an_expired_session_ends_an_idle_console():
+    consoles = console.Consoles(tasks=None)
+    ws = FakeWS()
+    transport = FakeTransport()
+    consoles.handlers[ws] = (None, "g1", transport)
+    sessions = type("S", (), {"get": lambda self, t, touch=False: None})()
+    await asyncio.wait_for(console._watch(ws, sessions, "tok", consoles, every=0.01), 2)
+    assert transport.aborted
+
+
+@pytest.mark.parametrize("stream,want", [
+    (b"\xff\xfb\x01\xff\xfb\x03hello", b"hello"),       # the greeting is dropped
+    (b"no greeting at all", b"no greeting at all"),      # anything else is kept
+    (b"\xff\xfb", b""),                                 # a cut-off greeting
+    (b"hi", b"hi"),                                     # a short stream that is not one
+])
+async def test_only_the_greeting_is_stripped(stream, want):
+    reader = asyncio.StreamReader()
+    reader.feed_data(stream)
+    reader.feed_eof()
+    ws = FakeWS()
+    room = console.ConsoleRoom()
+    await console._from_broker(reader, ws, room)
+    assert b"".join(x for x in ws.sent if isinstance(x, bytes)) == want
+    assert "the console closed" in ws.sent[-1] and ws.closed

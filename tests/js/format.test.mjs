@@ -62,3 +62,9 @@ test("slow paste sends one character at a time and can stop", async () => {
   assert.equal(await box.r.done, 1);
   assert.equal((await slowSend("é😀", 0, () => {}).done), 2);   // by character, not byte
 });
+
+test("slow paste stops when the keys can no longer go", async () => {
+  let n = 0;
+  const r = slowSend("abcdef", 0, () => ++n < 3);
+  assert.equal(await r.done, 2);
+});

@@ -268,3 +268,38 @@ async def test_flood_keeps_the_last_line(settings, tmp_path, monkeypatch):
     tasks = Tasks(settings, str(tmp_path / "t.log"), command=cmd)
     t = await finished(tasks, await tasks.submit("alice", "g1", "start"))
     assert t.message == "the end" and len(t.output) == 201 and t.output[-1] == "…"
+
+
+async def test_running_tasks_are_never_forgotten(settings, tmp_path, fake_cmd, monkeypatch):
+    allow(monkeypatch)
+    tasks = Tasks(settings, str(tmp_path / "t.log"), command=fake_cmd, keep=3)
+    t = await tasks.submit("alice", "slow-0.5", "start")
+    for i in range(5):
+        tasks.note("alice", "g1", "console", f"note {i}")
+    assert tasks.get(t.id) is t
+    await finished(tasks, t)
+
+
+async def test_a_running_stop_now_keeps_the_guest_busy(settings, tmp_path, fake_cmd, monkeypatch):
+    allow(monkeypatch)
+    tasks = Tasks(settings, str(tmp_path / "t.log"), command=fake_cmd)
+    first = await tasks.submit("alice", "slow-0.3", "shutdown")
+    cut = await tasks.submit("alice", "slow-0.3", "stop-now", confirmed=True)
+    await finished(tasks, first)
+    tasks.cutting["slow-0.3"] = cut if cut.result == "running" else cut
+    if cut.result == "running":
+        assert (await tasks.submit("bob", "slow-0.3", "start")).result == "refused"
+    await finished(tasks, cut)
+
+
+async def test_a_confirmation_from_an_earlier_run_is_refused(settings, tmp_path, fake_cmd,
+                                                              monkeypatch):
+    from emuctl.state import write_state
+    allow(monkeypatch, "for the guest it is a power cut")
+    write_state(settings.run_dir, "g1", state="ready", started_at=2000)
+    tasks = Tasks(settings, str(tmp_path / "t.log"), command=fake_cmd)
+    t = await tasks.submit("alice", "g1", "stop-now", confirmed=True, run=1000)
+    assert t.result == "refused" and "restarted" in t.message
+    t = await finished(tasks, await tasks.submit("alice", "g1", "stop-now", confirmed=True,
+                                                 run=2000))
+    assert t.result == "ok"

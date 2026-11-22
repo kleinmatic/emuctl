@@ -64,10 +64,10 @@ export function actionButtons(name, detail, onDone) {
   const menu = h("div", { class: "menu hidden", role: "menu" },
     h("button", { class: "item", type: "button", role: "menuitem", disabled: !(up && !stopping && stop.force && stop.force.allowed),
       text: "Stop (force)", title: "stop without shutting the guest OS down",
-      onclick: () => { menu.classList.add("hidden"); act("/stop", { mode: "force", power_cut: true }, cut("force")); } }),
+      onclick: () => { menu.classList.add("hidden"); act("/stop", { mode: "force", power_cut: true, run: detail.run }, cut("force")); } }),
     h("button", { class: "item", type: "button", role: "menuitem", disabled: !(up && stop.now && stop.now.allowed),
       text: "Stop now", title: "skip or cut short the guest's shutdown",
-      onclick: () => { menu.classList.add("hidden"); act("/stop", { mode: "now", power_cut: true }, cut("now")); } }));
+      onclick: () => { menu.classList.add("hidden"); act("/stop", { mode: "now", power_cut: true, run: detail.run }, cut("now")); } }));
   const toggle = h("button", { class: "btn", type: "button", "aria-haspopup": "menu", text: "Stop ▾",
     disabled: !up, title: up ? null : notRunning,
     onclick: (e) => { e.stopPropagation(); menu.classList.toggle("hidden"); } });

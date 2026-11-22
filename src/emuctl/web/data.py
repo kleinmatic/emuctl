@@ -11,6 +11,7 @@ import threading
 from .. import actions, full_version, hardware, service
 from ..config import ConfigError, load_config
 from ..settings import ETC
+from ..state import read_state
 
 ENV_DIR = os.path.join(ETC, "env")
 LOG_TAIL_BYTES = 256 * 1024
@@ -154,6 +155,9 @@ def guest_detail(settings, name, row):
         "nics": cfg.nics,
         "notes": bool(cfg.notes),
         "stop": stops,
+        # Which run of the guest this is: a power-cut confirmation names it,
+        # so one given for an earlier run cannot cut a later one.
+        "run": (read_state(settings.run_dir, name) or {}).get("started_at"),
         "can_start": start_ok,
         "start_refused": "" if start_ok else start_why,
         "boot_timeout": cfg.boot_timeout,

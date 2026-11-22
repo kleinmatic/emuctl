@@ -149,7 +149,9 @@ Body `{"mode": "clean"}`, `{"mode": "force"}` or `{"mode": "now"}`, which
 run `emuctl stop`, `emuctl stop --force` and `emuctl stop --now`
 ([stopping.md](stopping.md)). When the stop would be a power cut for the
 guest, the body must also say `"power_cut": true`, meaning the user was
-asked and agreed; otherwise the task is refused and nothing is done. The
+asked and agreed, and `"run"`: the `run` field of `GET /api/guests/{guest}`
+when they were asked. Otherwise, or if the guest has been restarted since,
+the task is refused and nothing is done. The
 page always asks before `force` and `now`. A `force` without
 `power_cut: true` runs plain `emuctl stop`, which refuses a cut itself.
 

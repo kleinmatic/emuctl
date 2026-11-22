@@ -18,11 +18,13 @@ import time
 from dataclasses import asdict, dataclass, field
 
 from .. import actions
+from ..state import read_state
 
 log = logging.getLogger("emuctl.web")
 KEEP = 200
 MAX_OUTPUT = 200            # lines of output kept per task
-DEADLINE = 600              # seconds; longer than any guest's stop (TimeoutStopSec=420)
+DEADLINE = 450              # seconds: past a guest's stop (TimeoutStopSec=420), inside the
+                            # web unit's own TimeoutStopSec=480
 ACTIONS = {"start": [], "shutdown": [], "stop": ["--force"], "stop-now": ["--now"]}
 STOP_MODE = {"shutdown": "clean", "stop": "force", "stop-now": "now"}
 LABELS = {"start": "Start", "shutdown": "Shutdown", "stop": "Stop (force)", "stop-now": "Stop now",
@@ -74,7 +76,12 @@ class Tasks:
         t = Task(self._next, user, guest, action, self.clock())
         self._next += 1
         self.recent.append(t)
-        del self.recent[:-self.keep]
+        while len(self.recent) > self.keep:
+            # Forget the oldest finished task; never one still running.
+            old = next((x for x in self.recent if x.result != "running"), None)
+            if old is None:
+                break
+            self.recent.remove(old)
         return t
 
     def get(self, task_id):
@@ -110,12 +117,15 @@ class Tasks:
         self._finish(t, "note", message)
         return t
 
+    def current_run(self, guest):
+        return (read_state(self.settings.run_dir, guest) or {}).get("started_at")
+
     def decide(self, guest, action):
         if action == "start":
             return actions.plan_start(self.settings, guest)
         return actions.plan_stop(self.settings, guest, STOP_MODE[action])
 
-    async def submit(self, user, guest, action, confirmed=False):
+    async def submit(self, user, guest, action, confirmed=False, run=None):
         """Start a task and return it at once; the action carries on in the background.
 
         The guest is claimed before anything is awaited, so two requests at
@@ -127,6 +137,8 @@ class Tasks:
         t = self._new(user, guest, action)
         self.publish("task", t.summary())
         busy = self.running.get(guest)
+        if busy is None and guest in self.cutting:
+            busy = self.cutting[guest]          # a stop-now still running counts as busy
         cutting_in = (busy is not None and action == "stop-now"
                       and busy.action in ("shutdown", "stop") and guest not in self.cutting)
         if busy and not cutting_in:
@@ -143,6 +155,10 @@ class Tasks:
             return t
         if not plan.allowed:
             self._finish(t, "refused" if plan.code else "skipped", plan.message)
+            return t
+        if plan.power_cut and confirmed and run != self.current_run(guest):
+            self._finish(t, "refused", f"{guest} has restarted since you confirmed; "
+                                       f"nothing was done. Ask again.")
             return t
         if plan.power_cut and not confirmed:
             # The page asks before a power cut. If what it asked about is out

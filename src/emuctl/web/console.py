@@ -13,6 +13,10 @@ messages:
 A page opens viewing: what the browser sends is dropped until it takes the
 keyboard. One page per guest holds the keyboard at a time; taking it from
 someone else moves it. Every take and release goes in the task log.
+
+The broker sends its telnet greeting once and then the guest's bytes as
+they are, so only the greeting is removed. A page that stops reading is
+cut off rather than allowed to hold anything open.
 """
 import asyncio
 import json
@@ -20,12 +24,15 @@ import logging
 
 from aiohttp import WSMsgType, web
 
-from ..telnet import strip_telnet
+from ..telnet import TN_INIT
 from . import data
 
 log = logging.getLogger("emuctl.web")
 SCROLLBACK = 64 * 1024
-MAX_INPUT = 4096            # bytes in one frame from the browser
+MAX_INPUT = 4096            # bytes in one frame from the browser (the page sends 1 KB)
+SEND_TIMEOUT = 2            # seconds a page may take to accept a status
+TAKE_BURST = 5              # takes and releases one page may make at once,
+TAKE_RATE = 1               # then this many a second
 
 
 class ConsoleRoom:
@@ -47,6 +54,8 @@ class Consoles:
         self.tasks = tasks
         self.rooms = {}             # guest -> ConsoleRoom
         self.by_session = {}        # session token -> set of ws
+        self.handlers = {}          # ws -> (handler task, guest, transport)
+        self.dropped = set()        # ws whose keyboard kick() took away
 
     def room(self, guest):
         return self.rooms.setdefault(guest, ConsoleRoom())
@@ -58,43 +67,65 @@ class Consoles:
         room = self.rooms.get(guest)
         for ws, _ in list(room.viewers if room else []):
             try:
-                await ws.send_str(json.dumps(room.status(ws, running, message)))
+                await asyncio.wait_for(ws.send_str(json.dumps(room.status(ws, running, message))),
+                                       SEND_TIMEOUT)
+            except asyncio.TimeoutError:
+                self.kick(ws)               # a page that stopped reading
             except (ConnectionResetError, RuntimeError):
                 pass
 
+    def kick(self, ws):
+        """End one console now: free its keyboard at once, then stop its
+        handler, whatever the browser is doing."""
+        task, guest, transport = self.handlers.get(ws, (None, None, None))
+        room = self.rooms.get(guest)
+        if room and room.typist is ws:
+            room.typist = None
+            self.dropped.add(ws)
+        if transport is not None:
+            transport.abort()               # a stalled browser cannot hold a close open
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+
     async def close_all(self):
-        for socks in list(self.by_session.values()):
-            for ws in list(socks):
-                await ws.close(message=b"the daemon is stopping")
+        tasks = [t for t, _, _ in self.handlers.values()]
+        for ws in list(self.handlers):
+            self.kick(ws)
+        if tasks:
+            await asyncio.wait(tasks, timeout=5)
 
     def end_session(self, token):
-        for ws in list(self.by_session.get(token, ())):
-            asyncio.get_running_loop().create_task(ws.close(message=b"session ended"))
+        for ws in list(self.by_session.pop(token, ())):
+            self.kick(ws)
 
 
 def escape_iac(data):
     return data.replace(b"\xff", b"\xff\xff")
 
 
-async def _watch(ws, sessions, token, every=30):
-    """Close a console whose session has expired, even if nobody types."""
+async def _watch(ws, sessions, token, consoles, every=30):
+    """End a console whose session has expired, even if nobody types."""
     while not ws.closed:
         await asyncio.sleep(every)
         if sessions.get(token, touch=False) is None:
-            await ws.close(message=b"session ended")
+            consoles.kick(ws)
+            return
 
 
 async def serve(request, cfg, consoles, sessions, can_type=True):
     """The WebSocket handler's body. `request` has passed every middleware."""
     guest, user, token = request["guest"], request["user"].name, request["session"].token
-    ws = web.WebSocketResponse(heartbeat=30, max_msg_size=MAX_INPUT * 2)
-    await ws.prepare(request)
+    ws = web.WebSocketResponse(heartbeat=30, max_msg_size=MAX_INPUT)
+    # Counted before anything is awaited, so the per-session cap holds.
+    consoles.by_session.setdefault(token, set()).add(ws)
+    consoles.handlers[ws] = (asyncio.current_task(), guest, request.transport)
     room = consoles.room(guest)
     room.viewers.append((ws, user))
-    consoles.by_session.setdefault(token, set()).add(ws)
     writer = None
-    watch = asyncio.create_task(_watch(ws, sessions, token))
+    watch = None
     try:
+        await ws.prepare(request)
+        watch = asyncio.create_task(_watch(ws, sessions, token, consoles))
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(cfg.bind, cfg.broker), 5)
@@ -106,54 +137,77 @@ async def serve(request, cfg, consoles, sessions, can_type=True):
             await ws.send_bytes(tail)
         if reader is None:
             await ws.send_str(json.dumps(room.status(ws, False, f"{guest} is not running")))
-            await ws.close()
             return ws
         await consoles.broadcast(guest)
-        pump = asyncio.create_task(_from_broker(reader, ws))
+        pump = asyncio.create_task(_from_broker(reader, ws, room))
         try:
             await _from_browser(ws, writer, room, consoles, guest, user, token, sessions,
                                 can_type)
         finally:
             pump.cancel()
-        if pump.done() and not pump.cancelled() and not ws.closed:
-            await ws.send_str(json.dumps(room.status(ws, False, "the console closed")))
+    except (ConnectionResetError, asyncio.CancelledError):
+        pass
     finally:
-        watch.cancel()
+        if watch is not None:
+            watch.cancel()
         if writer is not None:
             writer.close()
-        held = room.typist is ws
+        held = room.typist is ws or ws in consoles.dropped
+        consoles.dropped.discard(ws)
         room.viewers = [(w, u) for w, u in room.viewers if w is not ws]
-        if held:
+        if room.typist is ws:
             room.typist = None
+        if held:
             consoles.tasks.note(user, guest, "console", "gave back the keyboard (left the page)")
-        consoles.by_session.get(token, set()).discard(ws)
+        consoles.handlers.pop(ws, None)
+        socks = consoles.by_session.get(token)
+        if socks is not None:
+            socks.discard(ws)
+            if not socks:
+                del consoles.by_session[token]
         if not room.viewers:
             consoles.rooms.pop(guest, None)
         else:
             await consoles.broadcast(guest)
         if not ws.closed:
-            await ws.close()
+            try:
+                await asyncio.wait_for(ws.close(), SEND_TIMEOUT)
+            except (asyncio.TimeoutError, ConnectionResetError, asyncio.CancelledError):
+                if request.transport is not None:
+                    request.transport.abort()
     return ws
 
 
-async def _from_broker(reader, ws):
-    st = 0
+async def _from_broker(reader, ws, room):
+    # The broker greets every client with TN_INIT (two telnet options) and
+    # after that passes the guest's bytes through unchanged, 0xFF included.
+    # So only the greeting is removed; the rest goes to the page as it is.
+    try:
+        head = await reader.readexactly(len(TN_INIT))
+        if head != TN_INIT:
+            await ws.send_bytes(head)
+    except asyncio.IncompleteReadError as exc:
+        if exc.partial and exc.partial != TN_INIT[:len(exc.partial)]:
+            await ws.send_bytes(exc.partial)
     while True:
         chunk = await reader.read(65536)
         if not chunk:
             break
-        clean, st = strip_telnet(chunk, st)
-        if clean:
-            await ws.send_bytes(clean)
-    await ws.close()
+        await ws.send_bytes(chunk)
+    try:
+        await ws.send_str(json.dumps(room.status(ws, False, "the console closed")))
+    finally:
+        await ws.close()
 
 
 async def _from_browser(ws, writer, room, consoles, guest, user, token, sessions, can_type):
+    tokens, refilled = float(TAKE_BURST), 0.0
+    loop = asyncio.get_running_loop()
     async for msg in ws:
         if sessions.get(token, touch=False) is None:
             break                               # logged out or expired
         if msg.type == WSMsgType.BINARY:
-            if room.typist is not ws or len(msg.data) > MAX_INPUT:
+            if room.typist is not ws:
                 continue                        # viewing: keys are dropped
             sessions.get(token)                 # typing counts as activity
             writer.write(escape_iac(msg.data))
@@ -163,6 +217,13 @@ async def _from_browser(ws, writer, room, consoles, guest, user, token, sessions
                 kind = json.loads(msg.data).get("type")
             except (ValueError, AttributeError):
                 continue
+            if kind in ("take", "release"):
+                now = loop.time()
+                tokens = min(TAKE_BURST, tokens + (now - refilled) * TAKE_RATE)
+                refilled = now
+                if tokens < 1:
+                    continue                    # a flood of takes would bury the task log
+                tokens -= 1
             if kind == "take" and not can_type:
                 await ws.send_str(json.dumps(room.status(ws, True, "you may only watch")))
             elif kind == "take" and room.typist is not ws:

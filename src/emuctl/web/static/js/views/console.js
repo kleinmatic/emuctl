@@ -37,12 +37,21 @@ export function consoleView(name, store) {
   let closed = false;
   let pasting = null;
 
+  // Returns false when the keys could not go: then a slow paste stops.
   function send(text) {
-    if (ws && ws.readyState === WebSocket.OPEN && typing) ws.send(enc.encode(text));
+    if (!(ws && ws.readyState === WebSocket.OPEN && typing)) return false;
+    const bytes = enc.encode(text);
+    for (let i = 0; i < bytes.length; i += 1024) ws.send(bytes.subarray(i, i + 1024));
+    return true;
+  }
+
+  function stopPaste() {
+    if (pasting) { pasting.cancel(); pasting = null; }
   }
 
   function setStatus(s) {
     typing = s.typing;
+    if (!typing) stopPaste();       // never finish a paste after the keyboard went away
     term.options.disableStdin = !typing;
     for (const b of [...keyBtns, pasteBtn]) b.disabled = !typing;
     banner.classList.toggle("typing", typing);
@@ -82,7 +91,9 @@ export function consoleView(name, store) {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     ws = new WebSocket(`${proto}//${location.host}${guestPath(name, "/console")}`);
     ws.binaryType = "arraybuffer";
+    const mine = ws;
     ws.onmessage = (ev) => {
+      if (ws !== mine) return;
       if (typeof ev.data === "string") {
         try { setStatus(JSON.parse(ev.data)); } catch (e) { /* ignore */ }
       } else {
@@ -90,7 +101,8 @@ export function consoleView(name, store) {
       }
     };
     ws.onclose = () => {
-      if (closed) return;
+      if (closed || ws !== mine) return;
+      stopPaste();
       typing = false;
       term.options.disableStdin = true;
       for (const b of [...keyBtns, pasteBtn]) b.disabled = true;

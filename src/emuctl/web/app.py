@@ -490,8 +490,10 @@ async def guest_stop(request):
     if action is None:
         raise json_error(web.HTTPBadRequest, "mode must be clean, force or now")
     # The page sends power_cut: true only after the user confirmed one.
+    run = body.get("run")
     t = await request.app[TASKS].submit(request["user"].name, request["guest"], action,
-                                        confirmed=body.get("power_cut") is True)
+                                        confirmed=body.get("power_cut") is True,
+                                        run=run if isinstance(run, (int, float)) else None)
     return web.json_response(t.public())
 
 
@@ -576,8 +578,7 @@ async def sample_forever(app):
 
 async def end_streams(app):
     app[HUB].close_all()        # open pages would otherwise hold a shutdown for a minute
-    await app[STATE]["consoles"].close_all()
-    await app[TASKS].close()
+    await asyncio.gather(app[STATE]["consoles"].close_all(), app[TASKS].close())
     app[STATE]["login_pool"].shutdown(wait=False)
 
 
