@@ -1,0 +1,39 @@
+{
+ "gxemul": 1,
+ "name": "Invented DECstation for tests",
+ "machine": {
+  "type": "decstation",
+  "model": "3max",
+  "cpu": "",
+  "cpus": 0,
+  "memory_mb": 128
+ },
+ "drives": [
+  {
+   "file": "disk/rz0.img",
+   "kind": "disk",
+   "id": 0,
+   "readonly": false,
+   "product": ""
+  },
+  {
+   "file": "cd.iso",
+   "kind": "cdrom",
+   "id": 4,
+   "readonly": true,
+   "product": "RRD42"
+  }
+ ],
+ "display": {
+  "enabled": true
+ },
+ "slots": {
+  "0": "roms/pmagb_ba_1.1.bin"
+ },
+ "network": {
+  "enabled": true,
+  "type": "bridged",
+  "tapdev": "vea9",
+  "mac": "02:00:00:00:00:05"
+ }
+}

@@ -42,24 +42,26 @@ supervisor (read `AGENTS.md` rule 3 first) and teach `tests/fake_emulator.py`
 to misbehave the same way, behind a new option. Then write an end-to-end test
 in `tests/test_end_to_end.py` that fails without the change.
 
-## 4. Hardware parser (once `src/emuctl/hardware.py` exists)
+## 4. Hardware parser
 
-From phase 1 of the web work, emuctl reads each emulator's config to show the
-emulated hardware. For a new kind:
+emuctl reads each emulator's config to show the emulated hardware
+(`emuctl info <guest> --hardware`). For a new kind:
 
-1. Add the kind's name to the allowed values of the `kind` key in
-   `config.py`, and to the guess from the program name, with a test.
-2. Write a pure function `parse_<kind>(text)` in `hardware.py` returning the
-   common shape: `machine`, `cpu`, `memory`, `disks`, `nics` (each with
-   `model`, `mac`, `host_if`), `other`. A line it does not understand is left
-   out; the parser never raises.
+1. Add the kind's name to `KINDS` in `config.py`, and teach `guess_kind()`
+   its program name, with a case in `tests/test_config_keys.py`.
+2. Write a pure function `parse_<kind>(text)` in `hardware.py` that starts
+   from `empty()` and fills the common shape: `machine`, `cpu`, `memory`,
+   `disks` (`unit`, `model`, `file`, `kind`, `readonly`), `nics` (`unit`,
+   `model`, `mac` lower-case with colons, `host_if`), `other`. A line it does
+   not understand is left out; the parser never raises. Register it in
+   `PARSERS` and its usual file suffix in `CONFIG_SUFFIX`. `host_if` matters:
+   the network report (`network.py`) uses it to find the guest's tap.
 3. Add an invented fixture under `tests/fixtures/hardware/<kind>/` (no real
-   hostnames, MACs or addresses) and tests: the fixture parses to the
-   expected result, and a nonsense file returns an empty result without an
-   exception.
+   hostnames or addresses; MACs locally administered, `02:00:00:...`;
+   `test_fixtures_hold_nothing_real` checks) and tests in
+   `tests/test_hardware.py`: the fixture parses to the expected result, and
+   add the parser to `test_parsers_never_raise_on_nonsense`.
 4. Document the kind in `docs/config.md` under `kind` and in the emulator's
    page.
 5. `hardware.py` is in `NEW_MODULES` in `tools/coverage_check.py`; keep it at
    90% or more.
-
-Until `hardware.py` exists, skip this step. Update this skill when it lands.

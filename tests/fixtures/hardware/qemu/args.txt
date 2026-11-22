@@ -1,0 +1,1 @@
+qemu-system-ppc -L share -M 40p -m 192 -bios fw.rom -serial telnet::4900,server -hda disk.qcow2 -cdrom aix.iso -vga none -nographic -net nic,macaddr=02:00:00:00:00:06 -net tap,ifname=tap8,script=no,downscript=no

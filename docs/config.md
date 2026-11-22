@@ -99,6 +99,24 @@ monitoring commands and the web page what the guest is and where to look.
 | `notes` | none | A text file about the guest, shown by the web page. |
 | `hw.<label>` | none | A hardware line stated by hand, such as `hw.memory = 128 MB` or `hw.cpu = R3000, 25 MHz`. Shown as given, and used in place of anything read from `config` under the same label. |
 
+`emuctl info <guest> --hardware` (add `--json` for scripts) shows what emuctl
+read:
+
+```
+$ emuctl info vms-alpha --hardware
+machine     AlphaServer ES40
+cpu         1 × EV68CB, 800 MHz
+memory      1 GB
+disk        disk0.0: file, dka0.img
+nic         pci0.4: DEC 21143, 02:00:00:00:00:03, on tap2
+read from   /srv/emu/vms-alpha/es40.cfg
+```
+
+SIMH `.ini`, es40 `.cfg` and gxemul `machine.json` files are read from
+`config`, or found in `command` when `config` is not set. QEMU guests are read
+from `command`. A line emuctl does not understand is left out, never an
+error. Where the result is wrong or thin, add `hw.` lines.
+
 ## Host settings
 
 `/etc/emuctl/emuctl.conf` (`/usr/local/etc/emuctl/emuctl.conf` on FreeBSD), all

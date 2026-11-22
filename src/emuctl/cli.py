@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 
-from . import actions, full_version, service, supervisor, usage
+from . import actions, full_version, hardware, service, supervisor, usage
 from .config import ConfigError, load_config
 from .settings import SettingsError, load_settings
 from .state import effective_state, read_state
@@ -73,7 +73,11 @@ def cmd_list(settings, args):
 
 
 def cmd_info(settings, args):
-    need_guest(settings, args.guest)
+    cfg = need_guest(settings, args.guest)
+    if args.hardware:
+        hw = hardware.describe(cfg)
+        print(json.dumps(hw, indent=2) if args.json else hardware.format_hardware(hw))
+        return 0
     print(format_info(settings, args.guest))
     return 0
 
@@ -333,6 +337,9 @@ def build_parser():
 
     s = sub.add_parser("info", help="how to reach a guest and where its files live")
     s.add_argument("guest")
+    s.add_argument("--hardware", action="store_true",
+                   help="the emulated hardware, read from the emulator's config")
+    s.add_argument("--json", action="store_true", help="with --hardware: as JSON")
     s.set_defaults(func=cmd_info)
 
     s = sub.add_parser("status", help="one guest's state; exit 0 only when ready")

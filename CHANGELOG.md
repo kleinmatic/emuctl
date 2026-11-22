@@ -15,6 +15,9 @@
   `display`, `display_auth`, `display_password_file`, `notes` and
   `hw.<label>` (docs/config.md). `emuctl info` shows them and `emuctl check`
   reports named files that are missing.
+- `emuctl info <guest> --hardware` shows the emulated machine (CPU, memory,
+  disks, network cards and their host interfaces) read from the SIMH, es40,
+  gxemul or QEMU configuration.
 - Linux with systemd is the supported platform, Debian 13 the reference;
   the core keeps running on FreeBSD (docs/platforms.md).
 - `tools/devhost`: a throwaway host with four fake guests for trying emuctl

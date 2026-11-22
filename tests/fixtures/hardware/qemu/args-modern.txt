@@ -1,0 +1,1 @@
+qemu-system-x86_64 -machine q35,accel=kvm -m 2G -cpu host -smp 4 -drive file=os.qcow2,if=virtio,index=0 -drive file=inst.iso,media=cdrom,if=ide,index=1 -netdev tap,id=n0,ifname=tap6,script=no -device e1000,netdev=n0,mac=02:00:00:00:00:07 -nic user,model=virtio-net-pci
