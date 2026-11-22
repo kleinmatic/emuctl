@@ -67,6 +67,7 @@ To try it without a real emulator, see [docs/quickstart.md](docs/quickstart.md).
 - [Guest configuration](docs/config.md): every setting in a guest's file
 - [States](docs/states.md): what `emuctl list` is telling you
 - [Stopping](docs/stopping.md): what happens to the guest when you stop it
+- [Monitoring](docs/monitoring.md): what the resource numbers mean
 - Emulators: [SIMH](docs/emulators/simh.md), [es40](docs/emulators/es40.md),
   [QEMU](docs/emulators/qemu.md), [gxemul](docs/emulators/gxemul.md)
 - [Networking](docs/networking.md)

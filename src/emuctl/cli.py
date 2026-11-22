@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 
-from . import full_version, guard, service, supervisor
+from . import full_version, guard, service, supervisor, usage
 from .config import ConfigError, load_config
 from .settings import SettingsError, load_settings
 from .state import effective_state, read_state
@@ -42,12 +42,31 @@ def run(argv):
 
 # --- commands ---------------------------------------------------------------
 
+def load_configs(settings, names):
+    """{name: GuestConfig} for every guest whose conf parses."""
+    out = {}
+    for name in names:
+        try:
+            out[name] = load_config(settings.conf_path(name))
+        except (OSError, ConfigError):
+            pass
+    return out
+
+
+def with_usage(settings, rows, sample=False):
+    configs = load_configs(settings, [r["name"] for r in rows])
+    if sample:
+        return usage.sample(settings, rows, configs)
+    return usage.attach(settings, rows, configs)
+
+
 def cmd_list(settings, args):
     rows = [guest_status(settings, name) for name in settings.guests()]
+    with_usage(settings, rows, sample=args.usage)
     if args.json:
         print(json.dumps(rows, indent=2))
     elif rows:
-        print(format_table(rows))
+        print(format_table(rows, usage=args.usage))
     else:
         print(f"no guests configured in {settings.guest_dir}")
     return 0
@@ -63,6 +82,7 @@ def cmd_status(settings, args):
     need_guest(settings, args.guest)
     row = guest_status(settings, args.guest)
     if args.json:
+        with_usage(settings, [row])
         print(json.dumps(row, indent=2))
     else:
         print(row["state"] + (f"  ({row['detail']})" if row["detail"] else ""))
@@ -292,6 +312,8 @@ def build_parser():
 
     s = sub.add_parser("list", help="every guest and what it is doing")
     s.add_argument("--json", action="store_true")
+    s.add_argument("--usage", action="store_true",
+                   help="add CPU and memory use (takes a one-second sample)")
     s.set_defaults(func=cmd_list)
 
     s = sub.add_parser("info", help="how to reach a guest and where its files live")

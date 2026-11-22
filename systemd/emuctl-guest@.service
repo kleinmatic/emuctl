@@ -27,6 +27,11 @@ RuntimeDirectoryPreserve=yes
 # The supervisor handles SIGTERM: it shuts the guest down if the conf says how,
 # then stops the emulator. Keep this longer than the largest stop_timeout plus
 # a minute.
+# Per-guest resource numbers for `emuctl list --usage` and the web page.
+CPUAccounting=yes
+MemoryAccounting=yes
+TasksAccounting=yes
+IOAccounting=yes
 KillMode=mixed
 TimeoutStopSec=420
 Restart=no

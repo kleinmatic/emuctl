@@ -67,15 +67,24 @@ def guest_status(settings, name, probe=probe_guest):
     return row
 
 
-def format_table(rows):
+def format_table(rows, usage=False):
     head = ("GUEST", "NODE", "OS", "EMULATOR", "STATE", "UPTIME", "DETAIL")
     table = [head] + [
         (r["name"], r["node"], r["os"], r["emulator"], r["state"],
          uptime_str(r["uptime"]) if r["uptime"] is not None else "-", r["detail"])
         for r in rows]
+    always = (0, 4)
+    if usage:
+        from .usage import human_bytes
+        head = head[:6] + ("CPU%", "MEM") + head[6:]
+        table = [head] + [
+            row[:6] + ("-" if r.get("cpu_pct") is None else f"{r['cpu_pct']:.1f}",
+                       human_bytes(r.get("mem_bytes"))) + row[6:]
+            for row, r in zip(table[1:], rows)]
+        always = (0, 4, 6, 7)
     # Drop columns nobody filled in (os and emulator are optional labels).
     keep = [i for i in range(len(head))
-            if i in (0, 4) or any(row[i] not in ("", "-") for row in table[1:])]
+            if i in always or any(row[i] not in ("", "-") for row in table[1:])]
     widths = [max(len(row[i]) for row in table) for i in keep]
     return "\n".join(
         "  ".join(row[i].ljust(w) for i, w in zip(keep, widths)).rstrip() for row in table)
