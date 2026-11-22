@@ -24,6 +24,7 @@ tru64       down   -        -      -
 | `io_read_bytes`, `io_write_bytes` | | bytes read from and written to block devices since start; reads served from the host's cache are not counted | `io.stat` |
 | `disk_bytes` | | space the guest's disk images really take on the host | `stat()`: blocks × 512 |
 | `disk_nominal_bytes` | | the images' full size; larger than `disk_bytes` when an image is sparse | `stat()`: size |
+| `net_rx_bytes`, `net_tx_bytes` | | bytes the guest has received and sent over all its host interfaces, since each interface was created | `/sys/class/net/<if>/statistics` |
 
 The cgroup numbers cover everything in the guest's systemd unit: the
 supervisor, the emulator, and anything they start, such as a `stop_command`.
@@ -40,6 +41,9 @@ A number is shown as `-` (or `null` in JSON) when it cannot be read:
   emuctl turns on CPU, memory, task and I/O accounting. If you installed an
   older unit file, add `IOAccounting=yes` and the others in a drop-in.
 - The user running `emuctl` cannot read a disk image's directory.
+
+Network detail per interface, and the bridges, are in `emuctl net`; see
+[networking.md](networking.md).
 
 ## Cost
 

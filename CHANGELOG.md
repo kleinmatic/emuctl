@@ -18,6 +18,12 @@
 - `emuctl info <guest> --hardware` shows the emulated machine (CPU, memory,
   disks, network cards and their host interfaces) read from the SIMH, es40,
   gxemul or QEMU configuration.
+- `emuctl net` shows the host's bridges, their members and the guests behind
+  them; `emuctl net <guest>` shows a guest's interfaces, whether its MAC has
+  been seen on its bridge, and its traffic. `emuctl check` now warns about
+  missing interfaces, two guests sharing an interface or MAC, a ready guest
+  whose MAC was never seen, and checksum offload on a veth
+  (docs/networking.md). `list --json` carries each guest's network bytes.
 - Linux with systemd is the supported platform, Debian 13 the reference;
   the core keeps running on FreeBSD (docs/platforms.md).
 - `tools/devhost`: a throwaway host with four fake guests for trying emuctl

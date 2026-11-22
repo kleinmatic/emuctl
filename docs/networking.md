@@ -46,6 +46,61 @@ argument, for that kind of preparation.
   connection to the guest times out. Turning off `tx` offload on the host's
   interface, or using a tap instead of pcap, fixes it.
 
+## What emuctl reports
+
+emuctl still changes nothing here, but it does look. `emuctl net` shows every
+bridge, what is in it, and which guest is behind each tap:
+
+```
+$ emuctl net
+br0  (LAN via eth0) 192.0.2.10/24
+  eth0         physical  up    uplink
+  tap1         tap       up    vms-alpha
+  vea0         other     up    ultrix-mips
+br1  (host-only)
+  tap5         tap       down  aix-ppc
+warning: aix-ppc: interface tap5 is down
+```
+
+`emuctl net <guest>` shows one guest from its own side:
+
+```
+$ emuctl net ultrix-mips
+vea1: veth, up, in br0 (LAN) through its peer vea0
+  guest MAC   02:00:00:00:00:05  (seen on the bridge)
+  traffic     in 1.2M, out 310.4K, errors 0, dropped 0
+```
+
+Both take `--json`. emuctl finds a guest's interfaces in the emulator's own
+config (the tap or veth named there, and the guest's MAC address). Set `nics`
+in the guest's conf when it cannot.
+
+- **Up** for a tap means a process has it open. A stopped guest's tap shows
+  `down`.
+- **LAN** means the bridge has a member that leads off the host: a real
+  network card, a bond, or a VLAN on one. A bridge with only taps is
+  **host-only**.
+- **Seen on the bridge** means the bridge has learned the guest's MAC
+  address, so the guest has sent at least one frame recently. It needs the
+  `bridge` command (iproute2).
+- **Traffic** is from the guest's side: *in* is what the guest received. The
+  host's own counters for a tap count the other way round.
+- A guest on one end of a veth pair (gxemul reads its interface raw) is shown
+  in the bridge its peer belongs to.
+
+### Warnings
+
+`emuctl net` and `emuctl check` warn when:
+
+- an interface a guest names does not exist, or is in no bridge;
+- two guests use the same interface or the same MAC address and are not
+  `exclusive_with` each other;
+- a guest is `ready` but its MAC has never been seen on its bridge, which
+  usually means the guest's network is not configured, or it is on the wrong
+  bridge;
+- transmit checksum offload is on for a veth a guest uses (see "Things worth
+  knowing" above; needs `ethtool`).
+
 ## The health check
 
 Set `guest_addr` (and `guest_port` if it is not 23) and `emuctl list` reports

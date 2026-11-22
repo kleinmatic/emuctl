@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 
-from . import actions, full_version, hardware, service, supervisor, usage
+from . import actions, full_version, hardware, network, service, supervisor, usage
 from .config import ConfigError, load_config
 from .settings import SettingsError, load_settings
 from .state import effective_state, read_state
@@ -306,9 +306,14 @@ def cmd_check(settings, args):
         die(f"no such guest: {args.guest}", 2)
     if not names:
         print(f"no guests configured in {settings.guest_dir}")
+    try:
+        net = network.host_network(settings)["warnings"]
+    except Exception as exc:
+        net = [f"network check failed: {exc}"]
     bad = 0
     for name in names:
         errors, warnings = check_guest(settings, name)
+        warnings = warnings + [w for w in net if w.startswith(f"{name}: ")]
         print(f"{name}: " + ("ok" if not errors else f"{len(errors)} error(s)"))
         for e in errors:
             print(f"  error: {e}")
@@ -316,6 +321,19 @@ def cmd_check(settings, args):
             print(f"  warning: {w}")
         bad += bool(errors)
     return 1 if bad else 0
+
+
+def cmd_net(settings, args):
+    if args.guest:
+        need_guest(settings, args.guest)
+        rep = network.guest_network(settings, args.guest)
+        rep["warnings"] += [w for w in network.host_network(settings)["warnings"]
+                            if w.startswith(f"{args.guest}: uses ")]
+        print(json.dumps(rep, indent=2) if args.json else network.format_guest(rep))
+        return 0
+    rep = network.host_network(settings)
+    print(json.dumps(rep, indent=2) if args.json else network.format_host(rep))
+    return 0
 
 
 def cmd_supervise(settings, args):
@@ -372,6 +390,11 @@ def build_parser():
     s.add_argument("-n", "--lines", type=int, default=60)
     s.add_argument("-f", "--follow", action="store_true")
     s.set_defaults(func=cmd_log)
+
+    s = sub.add_parser("net", help="bridges, taps and which guest is on which")
+    s.add_argument("guest", nargs="?")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_net)
 
     s = sub.add_parser("check", help="validate a guest's conf against this host")
     s.add_argument("guest", nargs="?")

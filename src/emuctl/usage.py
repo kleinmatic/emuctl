@@ -97,7 +97,7 @@ def disk_usage(paths):
     return used, nominal
 
 
-def attach(settings, rows, configs, groups=None, root=CGROUP_ROOT):
+def attach(settings, rows, configs, groups=None, root=CGROUP_ROOT, net_host=None):
     """Add usage fields to `guest_status` rows, in place.
 
     `configs` maps guest name to its GuestConfig (missing for a broken conf).
@@ -112,7 +112,16 @@ def attach(settings, rows, configs, groups=None, root=CGROUP_ROOT):
         cfg = configs.get(row["name"])
         row["disk_bytes"], row["disk_nominal_bytes"] = disk_usage(cfg.disks) if cfg \
             else (None, None)
+        row["net_rx_bytes"], row["net_tx_bytes"] = _net(cfg, net_host) if cfg else (None, None)
     return rows
+
+
+def _net(cfg, host):
+    from . import network
+    try:
+        return network.nic_counters(cfg, host)
+    except Exception:           # the report must not fail over one odd config
+        return None, None
 
 
 def cpu_percent(before, after, seconds):
