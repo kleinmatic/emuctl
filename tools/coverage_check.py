@@ -14,7 +14,7 @@ Two rules:
 import json
 import sys
 
-TOTAL_FLOOR = 91
+TOTAL_FLOOR = 92
 NEW_FLOOR = 85
 # Paths as coverage reports them. A listed module that does not exist yet is skipped.
 NEW_MODULES = [
