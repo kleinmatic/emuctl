@@ -23,6 +23,9 @@
   ON LINE, LOCAL and KBD LOCKED. Or "modern": an ordinary terminal. Each
   user picks per guest; `console_look` in `web.conf` sets the default.
 - A phone layout: the guest list folds behind a "Guests" button.
+- The guest you are on stands out in the guest list, and state dots are lit
+  like front-panel LEDs (green ready, amber busy, orange stuck, red crashed);
+  a guest that is off is an unlit ring.
 
 ## 0.4.0 (2026-11-22)
 

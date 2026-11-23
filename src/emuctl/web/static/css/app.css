@@ -20,6 +20,7 @@
   --head: #f6f7f9; --accent: #1d5fbf; --accent-2: #b8590a; --sel: #e3ecfa; --ok: #1e7a3c;
   --warn: #a85a00; --bad: #b3261e; --info: #1d5fbf; --off: #6b7280; --bar: #2a3240;
   --bartext: #e8ebf0; --fill: #1d5fbf22; --note: #fff4e0; --term-bg: #0b0d10; --term-fg: #d6dde6;
+  --current: #cfe0fb; --current-text: #0d2f66;
   --sans: "IBM Plex Sans", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace;
   color-scheme: light;
 }
@@ -28,14 +29,14 @@
     --bg: #14171c; --panel: #1c2027; --line: #2e343e; --text: #e4e7ec; --muted: #9aa3b2;
     --head: #232830; --accent: #6ea3f2; --accent-2: #f0a43c; --sel: #24334d; --ok: #5cc47e;
     --warn: #f0a43c; --bad: #f2786f; --info: #6ea3f2; --off: #8b93a1; --bar: #0e1014;
-    --bartext: #e4e7ec; --fill: #6ea3f233; --note: #3a2c14; color-scheme: dark;
+    --bartext: #e4e7ec; --fill: #6ea3f233; --note: #3a2c14; --current: #2b4774; --current-text: #ffffff; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #14171c; --panel: #1c2027; --line: #2e343e; --text: #e4e7ec; --muted: #9aa3b2;
   --head: #232830; --accent: #6ea3f2; --accent-2: #f0a43c; --sel: #24334d; --ok: #5cc47e;
   --warn: #f0a43c; --bad: #f2786f; --info: #6ea3f2; --off: #8b93a1; --bar: #0e1014;
-  --bartext: #e4e7ec; --fill: #6ea3f233; --note: #3a2c14; color-scheme: dark;
+  --bartext: #e4e7ec; --fill: #6ea3f233; --note: #3a2c14; --current: #2b4774; --current-text: #ffffff; color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -70,7 +71,10 @@ nav.tree a { display: flex; align-items: center; gap: 8px; padding: 5px 12px;
   color: var(--text); text-decoration: none; }
 nav.tree a.host { font-weight: 600; }
 nav.tree a.guest { padding-left: 28px; }
-nav.tree a.current { background: var(--sel); }
+/* the guest you are on: a bar down the edge, a stronger tint, bold */
+nav.tree a.current { background: var(--current); color: var(--current-text); font-weight: 600;
+  box-shadow: inset 4px 0 0 var(--accent); }
+nav.tree a.current .state { color: inherit; opacity: 0.85; }
 nav.tree a:hover { background: var(--head); filter: none; }
 nav.tree .state { margin-left: auto; color: var(--muted); font-size: 11px; }
 main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; }
@@ -135,20 +139,25 @@ table.data th.num, table.data td.num { text-align: right; }
 table.data th.num { font-family: var(--sans); }
 table.data tr:last-child td { border-bottom: 0; }
 
-/* states */
-.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--off);
-  display: inline-block; }
+/* states: dots lit like a front panel's LEDs; a guest that is off is an
+   unlit ring, so it differs by shape as well as colour */
+.dot { width: 10px; height: 10px; border-radius: 50%; flex: none; display: inline-block;
+  background: transparent; box-shadow: inset 0 0 0 2px var(--off); }
 .st { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; color: var(--off); }
-.st .dot { width: 8px; height: 8px; }
-.st-ready { color: var(--ok); } .st-ready .dot, .dot.st-ready { background: var(--ok); }
+.st .dot { width: 9px; height: 9px; }
+.st-ready { color: var(--ok); }
+.st-ready .dot, .dot.st-ready { background: #22d35a; box-shadow: 0 0 0 1px #0a7a2c, 0 0 6px #22d35a99; }
 .st-booting, .st-starting, .st-stopping { color: var(--info); }
 .st-booting .dot, .st-starting .dot, .st-stopping .dot,
-.dot.st-booting, .dot.st-starting, .dot.st-stopping { background: var(--info); }
+.dot.st-booting, .dot.st-starting, .dot.st-stopping {
+  background: #ffb000; box-shadow: 0 0 0 1px #a06e00, 0 0 6px #ffb00099; }
 .st-stuck, .st-degraded, .st-halted, .st-orphaned { color: var(--warn); }
 .st-stuck .dot, .st-degraded .dot, .st-halted .dot, .st-orphaned .dot,
-.dot.st-stuck, .dot.st-degraded, .dot.st-halted, .dot.st-orphaned { background: var(--warn); }
+.dot.st-stuck, .dot.st-degraded, .dot.st-halted, .dot.st-orphaned {
+  background: #ff7a00; box-shadow: 0 0 0 1px #9a4a00, 0 0 6px #ff7a0099; }
 .st-crashed, .st-error { color: var(--bad); }
-.st-crashed .dot, .st-error .dot, .dot.st-crashed, .dot.st-error { background: var(--bad); }
+.st-crashed .dot, .st-error .dot, .dot.st-crashed, .dot.st-error {
+  background: #ff3b30; box-shadow: 0 0 0 1px #9a1a14, 0 0 6px #ff3b3099; }
 .detail { color: var(--muted); margin-left: 8px; font-weight: 400; }
 .lock { margin-left: 8px; padding: 0 6px; border: 1px solid var(--warn); border-radius: 3px;
   color: var(--warn); font-size: 11px; font-weight: 500; }
