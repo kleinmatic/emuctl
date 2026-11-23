@@ -133,6 +133,15 @@ The guest's `notes` file: `{"path", "text", "truncated"}`, at most the
 first 256 KB. 404 if the conf names none, or the daemon cannot read it.
 Files under `/etc/emuctl/env/` are never shown.
 
+### `GET /api/guests/{guest}/thumbnail` (operator)
+
+A PNG of the guest's screen, 320 pixels across, at most a minute old: the
+daemon logs in to the display as the Display tab does, takes one frame and
+logs out. However many pages ask, it connects at most once a minute per
+guest. 404 if the guest has no `display`, 409 if it is not running (the
+daemon does not connect then), 502 with the reason if the display could not
+be read. An operator's, like the display itself.
+
 ### `GET /api/guests/{guest}/hardware` (viewer)
 
 The same as `emuctl info <guest> --hardware --json`, plus `raw`: each config

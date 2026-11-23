@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // One guest: summary with graphs, network, hardware, logs.
-import { get, guestPath, poll } from "../api.js";
+import { get, guestPath, image, poll } from "../api.js";
 import { chart } from "../chart.js";
 import { clear, h, kv } from "../dom.js";
 import { DASH, bytes, isUp, last, longUptime, pct, rate } from "../format.js";
@@ -45,6 +45,18 @@ export function guestView(name, tab, store) {
   let detail = null;
   let closed = false;
   let logState = { source: "console", lines: 200 };
+  let shot = null;        // the screen thumbnail: {at, url} or {at, error}
+  async function thumbnail() {
+    if (shot && Date.now() - shot.at < 60000) return shot;
+    const old = shot;
+    try {
+      shot = { at: Date.now(), url: await image(guestPath(name, "/thumbnail")) };
+    } catch (e) {
+      shot = { at: Date.now(), error: e.message };
+    }
+    if (old && old.url) setTimeout(() => URL.revokeObjectURL(old.url), 1000);
+    return shot;
+  }
   let span = "1h";        // the graphs: the last hour or the last day
   let dayCache = null;    // the day changes once a minute: {at, data}
   function usage(fetch) {
@@ -103,6 +115,15 @@ export function guestView(name, tab, store) {
       ["Can start", up ? null : (d.can_start ? "yes" : d.start_refused)],
     ]));
     const cards = [status];
+    if (d.display && up && store.session.role !== "viewer") {
+      const t = await thumbnail();
+      cards.push(h("section", { class: "card" },
+        h("h2", {}, "Screen ", h("span", { class: "muted", text: "at most a minute old" })),
+        t.url
+          ? h("a", { href: `#/g/${encodeURIComponent(name)}/display`, title: "Open the display" },
+            h("img", { class: "thumb", src: t.url, alt: `${name}'s screen` }))
+          : h("div", { class: "muted", text: `No picture: ${t.error}` })));
+    }
     if (chk && (chk.errors.length || chk.warnings.length)) {
       cards.push(h("section", { class: "card" },
         h("h2", {}, "Checks ", h("span", { class: "muted", text: "emuctl check, as the web daemon sees it" })),
@@ -276,7 +297,12 @@ export function guestView(name, tab, store) {
   renderHead();
   if (tab !== "summary") refreshDetail();
   render();
-  return { el, close() { closed = true; store.listeners.delete(onRows); if (term) term.close(); if (screen) screen.close(); } };
+  return { el, close() {
+    closed = true; store.listeners.delete(onRows);
+    if (term) term.close();
+    if (screen) screen.close();
+    if (shot && shot.url) URL.revokeObjectURL(shot.url);
+  } };
 }
 
 // A console or display alone in its own window ("Pop out").

@@ -29,6 +29,22 @@ async function call(method, path, body, background = false) {
   return data;
 }
 
+// An image, as a blob: URL to put in an <img>. A timed refresh, so it does
+// not count as the user being active (an <img src> could not say so).
+export async function image(path) {
+  const r = await fetch(path, { credentials: "same-origin", headers: { "X-Emuctl-Background": "1" } });
+  if (r.status === 401) {
+    location.replace("/login");
+    throw new ApiError(401, "not logged in");
+  }
+  if (!r.ok) {
+    let data = null;
+    try { data = await r.json(); } catch (e) { /* not JSON */ }
+    throw new ApiError(r.status, (data && data.error) || `HTTP ${r.status}`);
+  }
+  return URL.createObjectURL(await r.blob());
+}
+
 export const get = (path) => call("GET", path);
 export const poll = (path) => call("GET", path, undefined, true);
 export const post = (path, body) => call("POST", path, body);

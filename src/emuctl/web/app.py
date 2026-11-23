@@ -585,9 +585,7 @@ async def guest_display(request):
         log.info("refused a display of %s for %s: %d already open", request["guest"],
                  request["user"].name, DISPLAYS_PER_SESSION)
         raise json_error(web.HTTPTooManyRequests, "too many displays open for this session")
-    row = find_row(request.app[SAMPLER].rows, request["guest"])
-    running = row is not None and row["state"] in ("starting", "booting", "stuck", "ready",
-                                                    "degraded", "halted")
+    running = screen_running(request)
     transport = request.transport
     socks.add(transport)
     try:
@@ -597,6 +595,34 @@ async def guest_display(request):
         socks.discard(transport)
         if not socks:
             displays.pop(token, None)
+
+
+SCREEN_STATES = ("starting", "booting", "stuck", "ready", "degraded", "halted")
+
+
+def screen_running(request):
+    """The guest is up, so its display port is its emulator's and not anyone's."""
+    row = find_row(request.app[SAMPLER].rows, request["guest"])
+    return row is not None and row["state"] in SCREEN_STATES
+
+
+@routes.get("/api/guests/{g}/thumbnail")
+@needs("operator")
+async def guest_thumbnail(request):
+    """A PNG of the guest's screen, at most a minute old. An operator's, as
+    the Display tab is: the screen may show what the guest is doing."""
+    from .rfb import RfbError
+    cfg = guest_config(request)
+    if not cfg.display:
+        raise json_error(web.HTTPNotFound, "this guest has no display")
+    if not screen_running(request):
+        request.app[STATE]["thumbs"].forget(cfg.name)
+        raise json_error(web.HTTPConflict, f"{cfg.name} is not running")
+    try:
+        body = await request.app[STATE]["thumbs"].get(cfg)
+    except RfbError as exc:
+        raise json_error(web.HTTPBadGateway, str(exc))
+    return web.Response(body=body, content_type="image/png")
 
 
 def end_displays(app, token):
@@ -716,6 +742,8 @@ def make_app(settings, conf, users=None, sampler=None, background=True):
     from .console import Consoles
     app[STATE]["consoles"] = Consoles(app[TASKS])
     app[STATE]["displays"] = {}
+    from .thumb import Thumbnails
+    app[STATE]["thumbs"] = Thumbnails()
     app[SESSIONS].on_end.append(lambda token: end_displays(app, token))
     app[SESSIONS].on_end.append(app[STATE]["consoles"].end_session)
     for p in (conf.state_dir, conf.cert_path, conf.key_path, conf.users_path,

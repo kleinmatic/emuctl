@@ -261,6 +261,8 @@ label.inline { display: flex; align-items: center; gap: 8px; color: var(--muted)
   border-radius: 4px; padding: 10px 16px; font-weight: 500; max-width: 80%; text-align: center; }
 
 /* display */
+img.thumb { display: block; width: 100%; max-width: 480px; height: auto; border-radius: 3px;
+  background: #000; image-rendering: auto; }
 .display { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
 .display .toolbar .spacer { flex: 1; }
 /* A definite height: noVNC sizes its canvas from 100% of this box. */
