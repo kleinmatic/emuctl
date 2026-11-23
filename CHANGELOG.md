@@ -2,11 +2,6 @@
 
 ## Unreleased
 
-- The web daemon starts with a `tls_cert` that holds the whole chain (an
-  ACME client's `fullchain.pem`); it used to fail logging the fingerprint.
-- Logins survive a restart of the web daemon. Sessions are kept in
-  `sessions.json` in its state directory, by the SHA-256 of each cookie only.
-
 - `locked = <reason>` in a guest's conf refuses every start, from
   `emuctl start`, the web page or the service manager, with that reason.
   `emuctl check`, `emuctl info` and the web page show it.
@@ -28,9 +23,19 @@
   ON LINE, LOCAL and KBD LOCKED. Or "modern": an ordinary terminal. Each
   user picks per guest; `console_look` in `web.conf` sets the default.
 - A phone layout: the guest list folds behind a "Guests" button.
-- The guest you are on stands out in the guest list, and state dots are lit
-  like front-panel LEDs (green ready, amber busy, orange stuck, red crashed);
-  a guest that is off is an unlit ring.
+- The guest you are on stands out in the guest list, and state dots glow
+  like front-panel LEDs (green ready, amber busy, orange stuck, red
+  crashed); a guest that is off is an unlit dot.
+- Logins survive a restart of the web daemon. Sessions are kept in
+  `sessions.json` in its state directory, by the SHA-256 of each cookie only.
+
+### Fixed
+
+- The web daemon starts with a `tls_cert` that holds the whole chain (an
+  ACME client's `fullchain.pem`); it used to fail logging the fingerprint.
+- `emuctl check` no longer reports every port as in use for `bind = ::1`,
+  flags a directory given as `command` or `stop_command`, and sees a port
+  clash between `bind = localhost` and `bind = 127.0.0.1`.
 
 ## 0.4.0 (2026-11-22)
 
