@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The web daemon starts with a `tls_cert` that holds the whole chain (an
+  ACME client's `fullchain.pem`); it used to fail logging the fingerprint.
 - Logins survive a restart of the web daemon. Sessions are kept in
   `sessions.json` in its state directory, by the SHA-256 of each cookie only.
 

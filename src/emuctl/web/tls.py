@@ -79,8 +79,12 @@ def server_context(cert, key):
 
 
 def fingerprint(cert):
-    """The certificate's SHA-256 fingerprint, as browsers show it."""
+    """The SHA-256 fingerprint of the first certificate in `cert` (the
+    server's own, in a file that may hold the whole chain), as browsers show it."""
     with open(cert) as fh:
-        der = ssl.PEM_cert_to_DER_cert(fh.read())
+        text = fh.read()
+    end = "-----END CERTIFICATE-----"
+    first = text[text.index("-----BEGIN CERTIFICATE-----"):text.index(end) + len(end)]
+    der = ssl.PEM_cert_to_DER_cert(first)
     h = hashlib.sha256(der).hexdigest().upper()
     return ":".join(h[i:i + 2] for i in range(0, len(h), 2))

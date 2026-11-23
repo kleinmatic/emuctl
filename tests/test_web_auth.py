@@ -69,6 +69,10 @@ def test_self_signed_certificate_made_once(tmp_path):
     assert len(first.split(":")) == 32
     assert tls.ensure_cert(c) is False                  # reused, not remade
     assert tls.fingerprint(c.cert_path) == first
+    chain = tmp_path / "chain.pem"                  # a full chain: the first one counts
+    pem = open(c.cert_path).read()
+    chain.write_text(pem + pem.replace("A", "B", 1))
+    assert tls.fingerprint(str(chain)) == first
     tls.server_context(c.cert_path, c.key_path)
 
 
