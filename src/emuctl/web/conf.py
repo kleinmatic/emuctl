@@ -15,8 +15,9 @@ DEFAULT_PATH = os.path.join(ETC, "web.conf")
 STATE_DIR = "/var/lib/emuctl-web"
 # Root's, readable by the daemon's group: the daemon cannot add users to it.
 USERS_FILE = os.path.join(ETC, "web-users")
+TOKENS_FILE = os.path.join(ETC, "web-tokens")
 KEYS = ("listen", "port", "tls", "tls_cert", "tls_key", "state_dir", "users_file", "task_log",
-        "server_names", "history_file")
+        "server_names", "history_file", "tokens_file")
 
 
 class WebConfError(Exception):
@@ -35,6 +36,7 @@ class WebConf:
     task_log: str = "/var/log/emuctl/web-tasks.log"
     server_names: tuple = ()    # host names the page may be reached by, beyond the host's own
     history_file: str = ""      # empty: history.json in state_dir; "off": not saved
+    tokens_file: str = TOKENS_FILE
 
     @property
     def self_signed(self):
@@ -89,7 +91,8 @@ def parse_web_conf(text, where="web.conf"):
             out[k] = names
         elif k == "history_file" and v == "off":
             out[k] = v
-        elif k in ("tls_cert", "tls_key", "state_dir", "users_file", "task_log", "history_file"):
+        elif k in ("tls_cert", "tls_key", "state_dir", "users_file", "task_log", "history_file",
+                   "tokens_file"):
             if v and not os.path.isabs(v):
                 raise WebConfError(f"{where}: {k} must be an absolute path")
             out[k] = v

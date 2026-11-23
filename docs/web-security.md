@@ -45,6 +45,15 @@ everything until roles arrive. Passwords are stored as scrypt hashes (cost
 and no password reset by mail: the admin sets passwords with
 `emuctl web passwd`.
 
+Scripts and monitoring use **API tokens** (`emuctl web token add <name>`)
+instead. A token can only read: GET requests to the routes a viewer may
+use, and `/metrics`. It cannot start or stop a guest, open a console or a
+display, or see the screen. Tokens are 256 random bits, sent as
+`Authorization: Bearer`; the tokens file keeps only their SHA-256, and is
+root's, so the daemon cannot add one. Anyone holding a token can read what
+the page shows, console logs included, so treat one like a password and
+revoke it (`emuctl web token revoke <name>`) when it is no longer needed.
+
 ## How it is protected
 
 These are the rules every change to the web code follows (they are also in
@@ -100,8 +109,8 @@ open files.
 
 - **The page's own files are public.** HTML, JavaScript, CSS and fonts under
   `/static/` are served without a session: they are the same open-source
-  files for everyone and hold no data. Everything under `/api/` needs a
-  session.
+  files for everyone and hold no data. Everything under `/api/`, and
+  `/metrics`, needs a session or an API token.
 - **The Origin check trusts the `Host` header** the browser sends. A page on
   another site cannot set either, so cross-site requests fail. It does not
   protect against someone who already has your session cookie.

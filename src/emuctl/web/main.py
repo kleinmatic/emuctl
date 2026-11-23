@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""`emuctl web serve` and `emuctl web passwd`."""
+"""`emuctl web serve`, `emuctl web passwd` and `emuctl web token`."""
 import dataclasses
 import getpass
 import logging
@@ -38,6 +38,41 @@ def cmd_passwd(args):
         sys.stderr.write(f"emuctl: {exc}; run as root or as the web daemon's account\n")
         return 1
     print(f"set the password for {args.user} in {path}")
+    return 0
+
+
+def cmd_token(args):
+    import time
+
+    from . import tokens
+    try:
+        conf = load_web_conf()
+    except WebConfError as exc:
+        sys.stderr.write(f"emuctl: {exc}\n")
+        return 2
+    path = conf.tokens_file
+    try:
+        if args.token_action == "add":
+            token = tokens.add_token(path, args.name)
+            print(token)
+            sys.stderr.write(f"emuctl: made the API token {args.name!r}. It is shown only now; "
+                             f"it reads the guests and /metrics, and changes nothing.\n")
+        elif args.token_action == "revoke":
+            tokens.revoke_token(path, args.name)
+            print(f"revoked {args.name}")
+        else:
+            found = tokens.list_tokens(path)
+            if not found:
+                print(f"no API tokens in {path}")
+            for t in found:
+                made = time.strftime("%Y-%m-%d %H:%M", time.localtime(t.created))
+                print(f"{t.name:<32} made {made}")
+    except auth.AuthError as exc:
+        sys.stderr.write(f"emuctl: {exc}\n")
+        return 1
+    except PermissionError as exc:
+        sys.stderr.write(f"emuctl: {exc}; run as root or as the web daemon's account\n")
+        return 1
     return 0
 
 
@@ -99,6 +134,14 @@ def add_parser(sub):
     s.add_argument("--stdin", action="store_true",
                    help="read the password from one line of standard input")
     s.set_defaults(web_func="passwd")
+    s = wsub.add_parser("token", help="make, list or revoke read-only API tokens")
+    tsub = s.add_subparsers(dest="token_action", metavar="action")
+    t = tsub.add_parser("add", help="make a token and print it (once)")
+    t.add_argument("name")
+    t = tsub.add_parser("revoke", help="revoke a token")
+    t.add_argument("name")
+    tsub.add_parser("list", help="list tokens by name")
+    s.set_defaults(web_func="token", token_action="list")
     return p
 
 
@@ -108,6 +151,8 @@ def run(settings, args, parser):
         return cmd_serve(settings, args)
     if which == "passwd":
         return cmd_passwd(args)
+    if which == "token":
+        return cmd_token(args)
     parser.print_help()
     return 2
 

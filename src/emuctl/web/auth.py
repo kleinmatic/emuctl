@@ -85,7 +85,7 @@ def parse_users(text):
     return users
 
 
-def read_users(path, strict=False):
+def read_users(path, strict=False, parse=None):
     """The users in `path`. A file that cannot be read gives no users, so
     nobody can log in, rather than an error on every request. With strict
     (when about to rewrite it), anything but a missing file is an error."""
@@ -96,10 +96,10 @@ def read_users(path, strict=False):
     except OSError as exc:
         if strict:
             raise AuthError(f"cannot read {path}: {exc.strerror or exc}; not changing it")
-        log.warning("cannot read the users file %s: %s", path, exc)
+        log.warning("cannot read %s: %s", path, exc)
         return {}
     with os.fdopen(fd) as fh:
-        return parse_users(fh.read())
+        return (parse or parse_users)(fh.read())
 
 
 @contextlib.contextmanager
@@ -148,15 +148,15 @@ def _daemon_gid():
         return None
 
 
-def write_users(path, users):
-    """Replace the users file. Call inside _update().
+def write_users(path, users, line=lambda u: f"{u.name}:{u.role}:{u.hash}"):
+    """Replace the users file (or the tokens file, with `line`). Call inside _update().
 
     Written by root in a root-owned directory (the default, /etc/emuctl), it is
     root's, mode 0640, group emuctl-web: the daemon can read it but not change
     it. Anywhere else it is the writer's own, mode 0600.
     """
     d = os.path.dirname(path) or "."
-    fd, tmp = tempfile.mkstemp(dir=d, prefix=".users.")
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=f".{os.path.basename(path)}.")
     try:
         gid = _daemon_gid() if os.geteuid() == 0 else None
         if gid is not None:
@@ -166,7 +166,7 @@ def write_users(path, users):
             os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w") as fh:
             for u in users.values():
-                fh.write(f"{u.name}:{u.role}:{u.hash}\n")
+                fh.write(line(u) + "\n")
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -177,8 +177,9 @@ def write_users(path, users):
 
 
 @contextlib.contextmanager
-def _update(path):
-    """Read, change and write the users file under a lock, as its directory's owner."""
+def _update(path, parse=None, line=None):
+    """Read, change and write the users file under a lock, as its directory's
+    owner. `parse` and `line` read and write another file the same way."""
     d = _check_dir(path)
     root_dir = os.lstat(d).st_uid == 0
     with (contextlib.nullcontext() if root_dir else _as_owner_of(d)):
@@ -186,9 +187,12 @@ def _update(path):
                        0o600)
         try:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            users = read_users(path, strict=True)
+            users = read_users(path, strict=True, parse=parse or parse_users)
             yield users
-            write_users(path, users)
+            if line:
+                write_users(path, users, line)
+            else:
+                write_users(path, users)
         finally:
             os.close(lock)
 

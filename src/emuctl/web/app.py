@@ -35,6 +35,7 @@ from .auth import LoginLimiter, Sessions, Users
 from .auth import _addr_key as auth_addr_key
 from .sampler import Sampler
 from .tasks import Tasks
+from .tokens import Tokens
 
 log = logging.getLogger("emuctl.web")
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -66,6 +67,7 @@ LIMITER = web.AppKey("limiter", LoginLimiter)
 SAMPLER = web.AppKey("sampler", Sampler)
 HUB = web.AppKey("hub", object)
 TASKS = web.AppKey("tasks", Tasks)
+TOKENS = web.AppKey("tokens", Tokens)
 STATE = web.AppKey("state", dict)
 
 
@@ -84,13 +86,23 @@ def needs(role):
     return mark
 
 
+def sessions_only(handler):
+    """A route for the page itself, not for API tokens."""
+    handler.sessions_only = True
+    return handler
+
+
 def json_error(cls, message, **kw):
     return cls(text=json.dumps({"error": message}), content_type="application/json", **kw)
 
 
+def is_api(request):
+    return request.path.startswith("/api/") or request.path == "/metrics"
+
+
 def refuse(request, cls, message):
     """An error as JSON for the API, as text for anything else."""
-    if request.path.startswith("/api/"):
+    if is_api(request):
         return json_error(cls, message)
     return cls(text=message)
 
@@ -103,7 +115,7 @@ async def add_security_headers(request, response):
     h.setdefault("X-Content-Type-Options", "nosniff")
     h.setdefault("X-Frame-Options", "DENY")
     h.setdefault("Referrer-Policy", "no-referrer")
-    h.setdefault("Cache-Control", "no-store" if request.path.startswith("/api/") else "no-cache")
+    h.setdefault("Cache-Control", "no-store" if is_api(request) else "no-cache")
     # No Strict-Transport-Security: it would apply to every port on the host
     # name for a year, not just this one.
 
@@ -170,6 +182,9 @@ async def auth_middleware(request, handler):
         raise refuse(request, web.HTTPForbidden, "request from another site refused")
     if is_public(request):
         return await handler(request)
+    bearer = request.headers.get("Authorization", "")
+    if bearer.startswith("Bearer "):
+        return await token_request(request, handler, bearer[len("Bearer "):].strip())
 
     # The page's own timed refreshes say so, and do not count as the user
     # being active: a forgotten tab still lets the session time out.
@@ -177,7 +192,7 @@ async def auth_middleware(request, handler):
                   or request.path == "/api/events")   # EventSource cannot send headers
     session = request.app[SESSIONS].get(request.cookies.get(COOKIE), touch=not background)
     if session is None:
-        if request.path.startswith("/api/"):
+        if is_api(request):
             raise json_error(web.HTTPUnauthorized, "not logged in")
         raise web.HTTPFound("/login")
     user = request.app[USERS].get(session.user)
@@ -187,6 +202,29 @@ async def auth_middleware(request, handler):
     if request.method not in SAFE_METHODS and not csrf_ok(request, session):
         raise refuse(request, web.HTTPForbidden, "missing or wrong CSRF token")
     request["session"], request["user"] = session, user
+    return await handler(request)
+
+
+class TokenUser:
+    """Who a request with an API token is: a viewer, whatever the token's name."""
+    role = "viewer"
+
+    def __init__(self, token):
+        self.name = f"token:{token.name}"
+
+
+async def token_request(request, handler, presented):
+    """An API token reads; it never changes anything, and opens no console."""
+    token = request.app[TOKENS].check(presented)
+    if token is None:
+        log.warning("refused an unknown API token from %s for %s", request.remote, request.path)
+        raise refuse(request, web.HTTPUnauthorized, "unknown API token")
+    role = getattr(request.match_info.handler, "role", None)
+    if (request.method not in ("GET", "HEAD") or changes_something(request)
+            or role is None or ROLE_RANK[role] > ROLE_RANK["viewer"]
+            or getattr(request.match_info.handler, "sessions_only", False)):
+        raise refuse(request, web.HTTPForbidden, "an API token can only read")
+    request["user"] = TokenUser(token)
     return await handler(request)
 
 
@@ -269,6 +307,7 @@ async def login_page(request):
 
 @routes.get("/")
 @needs("viewer")
+@sessions_only
 async def index_page(request):
     return web.FileResponse(os.path.join(STATIC, "index.html"))
 
@@ -338,6 +377,7 @@ async def _login(request, app, addr, limiter):
 
 @routes.post("/api/logout")
 @needs("viewer")
+@sessions_only
 async def logout(request):
     request.app[SESSIONS].end(request["session"].token)
     log.info("%s logged out", request["user"].name)
@@ -348,6 +388,7 @@ async def logout(request):
 
 @routes.get("/api/session")
 @needs("viewer")
+@sessions_only
 async def session_info(request):
     s, u = request["session"], request["user"]
     return web.json_response({"user": u.name, "role": u.role, "csrf": s.csrf,
@@ -398,6 +439,16 @@ async def host_network(request):
     from .. import network
     s = request.app[SETTINGS]
     return web.json_response(await cached(request.app, "host", lambda: network.host_network(s)))
+
+
+@routes.get("/metrics")
+@needs("viewer")
+async def metrics(request):
+    """Prometheus' text format. Read with an API token: emuctl web token add <name>."""
+    from . import metrics as m
+    rows = await current_rows(request.app)
+    return web.Response(text=m.render(rows, full_version()),
+                        content_type="text/plain", charset="utf-8")
 
 
 @routes.get("/api/energy")
@@ -557,6 +608,7 @@ CONSOLES_PER_SESSION = 8
 
 @routes.get("/api/guests/{g}/console")
 @needs("viewer")
+@sessions_only
 async def guest_console(request):
     """WebSocket. Viewing needs a viewer; taking the keyboard, an operator."""
     from . import console
@@ -634,6 +686,7 @@ def end_displays(app, token):
 
 @routes.get("/api/events")
 @needs("viewer")
+@sessions_only
 async def events(request):
     app, token = request.app, request["session"].token
     if sum(t == token for t in app[HUB].subs.values()) >= STREAMS_PER_SESSION:
@@ -727,6 +780,7 @@ def make_app(settings, conf, users=None, sampler=None, background=True):
     app[SESSIONS] = Sessions(app[USERS])
     app[LIMITER] = LoginLimiter()
     app[SAMPLER] = sampler or Sampler(settings, history_file=conf.history_path)
+    app[TOKENS] = Tokens(conf.tokens_file)
     hub = Hub()
     app[HUB] = hub
     app[SESSIONS].on_end.append(hub.end_session)
@@ -747,7 +801,7 @@ def make_app(settings, conf, users=None, sampler=None, background=True):
     app[SESSIONS].on_end.append(lambda token: end_displays(app, token))
     app[SESSIONS].on_end.append(app[STATE]["consoles"].end_session)
     for p in (conf.state_dir, conf.cert_path, conf.key_path, conf.users_path,
-              conf.history_path):
+              conf.history_path, conf.tokens_file):
         if p and p not in data.PROTECTED:
             data.PROTECTED.append(p)
     app.on_response_prepare.append(add_security_headers)

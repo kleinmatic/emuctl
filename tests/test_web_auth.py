@@ -254,7 +254,7 @@ def test_unreadable_users_file_means_no_users(tmp_path, caplog):
     p = tmp_path / "users"
     os.symlink("/etc/hostname", p)                      # never followed
     assert auth.read_users(str(p)) == {}
-    assert "cannot read the users file" in caplog.text
+    assert "cannot read" in caplog.text
 
 
 # --- emuctl web passwd ----------------------------------------------------------

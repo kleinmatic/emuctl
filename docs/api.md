@@ -18,6 +18,45 @@ session time out.
 "Role" is the least a user needs. Until roles arrive every user is an admin,
 so every route is open to every logged-in user.
 
+## API tokens
+
+For scripts and monitoring, an API token instead of a login:
+
+```
+# emuctl web token add prometheus
+emuctl_3kQ...
+$ curl -k -H "Authorization: Bearer emuctl_3kQ..." https://host:8600/api/guests
+```
+
+A token is a viewer that can only read: any GET route marked (viewer)
+below, and `/metrics`. It cannot start or stop anything, open a console, a
+display or a thumbnail, or use `/api/session` or `/api/events`, which belong
+to the page. It needs no cookie, CSRF token or Origin. The token is printed
+once; the file (`tokens_file`, by default `/etc/emuctl/web-tokens`, root's
+and readable by the daemon) keeps only its SHA-256. `emuctl web token list`
+names the tokens; `emuctl web token revoke <name>` ends one at once. A wrong
+token is a 401, a token used for anything but reading a 403.
+
+### `GET /metrics` (viewer)
+
+The guests in Prometheus' text format, from the last sample (at most 5
+seconds old): `emuctl_guest_up`, `emuctl_guest_state` (one series per
+state, 1 for the current one), `emuctl_guest_locked`,
+`emuctl_guest_uptime_seconds`, `emuctl_guest_cpu_percent`,
+`emuctl_guest_cpu_seconds_total`, `emuctl_guest_memory_bytes`,
+`emuctl_guest_io_read_bytes_total`, `emuctl_guest_io_write_bytes_total`,
+`emuctl_guest_network_receive_bytes_total`,
+`emuctl_guest_network_transmit_bytes_total`, `emuctl_guest_disk_bytes`, and
+`emuctl_build_info`. Each has a `guest` label. A Prometheus job:
+
+```yaml
+- job_name: emuctl
+  scheme: https
+  tls_config: {insecure_skip_verify: true}    # or ca_file, with a real certificate
+  authorization: {credentials_file: /etc/prometheus/emuctl-token}
+  static_configs: [{targets: ["starry.local:8600"]}]
+```
+
 ## Logging in
 
 ### `POST /api/login` (public)
