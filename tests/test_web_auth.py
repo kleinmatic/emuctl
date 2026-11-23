@@ -330,13 +330,14 @@ def test_passwd_will_not_overwrite_an_unreadable_file(tmp_path):
 
 def test_sessions_survive_a_restart_but_not_their_limits(tmp_path):
     clock = Clock()
-    present = {"alice": types.SimpleNamespace(hash="h1")}
+    marker = "scrypt$a-password-hash-that-must-not-be-saved"
+    present = {"alice": types.SimpleNamespace(hash=marker)}
     users = types.SimpleNamespace(get=present.get)
     path = str(tmp_path / "sessions.json")
     s = auth.Sessions(users, idle=100, clock=clock, path=path)
     a = s.new("alice")
     text = (tmp_path / "sessions.json").read_text()
-    assert a.cookie not in text and "h1" not in text            # digests only
+    assert a.cookie not in text and marker not in text          # digests only
     assert oct(os.stat(path).st_mode & 0o777) == "0o600"
     again = auth.Sessions(users, idle=100, clock=clock, path=path)
     again.load()
