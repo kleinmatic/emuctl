@@ -1,23 +1,49 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // The serial console: xterm.js on a WebSocket to the guest's console broker.
 // It opens viewing; keys go to the guest only after "Take keyboard".
-import { FitAddon } from "../../vendor/xterm/addon-fit.mjs";
+// The screen is 80 x 24, as the guests' consoles are, in a terminal's case
+// whose lamps say what the page is doing: ON LINE when connected, LOCAL when
+// not, KBD LOCKED while your keys are not sent.
 import { Terminal } from "../../vendor/xterm/xterm.mjs";
 import { get, guestPath } from "../api.js";
 import { h, overlay } from "../dom.js";
 import { slowSend } from "../keys.js";
+import { COLS, PHOSPHORS, ROWS, fontFor, storePhosphor, storedPhosphor, xtermTheme } from "../phosphor.js";
 
 const KEYS = [["Ctrl-P", "\x10"], ["Ctrl-E", "\x05"], ["Ctrl-C", "\x03"], ["Ctrl-]", "\x1d"]];
 
 export function consoleView(name, store) {
   const enc = new TextEncoder();
-  const term = new Terminal({ fontFamily: '"IBM Plex Mono", monospace', fontSize: 13,
-    scrollback: 5000, convertEol: false, cursorBlink: true, disableStdin: true,
-    theme: { background: "#0b0d10", foreground: "#d6dde6" } });
-  const fit = new FitAddon();
-  term.loadAddon(fit);
+  let look = storedPhosphor();
+  const term = new Terminal({ cols: COLS, rows: ROWS, scrollback: 5000, convertEol: false,
+    cursorBlink: true, disableStdin: true, letterSpacing: 0, theme: xtermTheme(look),
+    fontFamily: fontFor(look, 9999, 9999).family });
   const screen = h("div", { class: "terminal", "aria-label": `Console of ${name}` });
   const frame = h("div", { class: "terminal-frame" }, screen);
+  const lamp = (label) => h("span", { class: "lamp", text: label });
+  const lamps = { online: lamp("ON LINE"), local: lamp("LOCAL"), locked: lamp("KBD LOCKED") };
+  const vt = h("div", { class: "vt", dataset: { look } },
+    h("div", { class: "vt-case" },
+      h("div", { class: "vt-bezel" }, frame),
+      h("div", { class: "vt-strip" }, h("span", { class: "vt-badge", text: name }),
+        h("span", { class: "lamps", "aria-hidden": "true" }, lamps.online, lamps.local, lamps.locked))));
+  const box = h("div", { class: "vt-box" }, vt);
+  function setLamps(online, typingNow) {
+    lamps.online.classList.toggle("on", online);
+    lamps.local.classList.toggle("on", !online);
+    lamps.locked.classList.toggle("on", online && !typingNow);
+  }
+  setLamps(false, false);
+  const lookSel = h("select", { "aria-label": "Screen" },
+    Object.entries(PHOSPHORS).map(([id, p]) => h("option", { value: id, text: p.label })));
+  lookSel.value = look;
+  lookSel.addEventListener("change", () => {
+    look = lookSel.value;
+    storePhosphor(look);
+    vt.dataset.look = look;
+    term.options.theme = xtermTheme(look);
+    sizeScreen();
+  });
   let veil = null;
   function cover(text) {
     if (veil) veil.remove();
@@ -36,12 +62,12 @@ export function consoleView(name, store) {
     onclick: () => connect() });
   const el = h("div", { class: "console" }, banner,
     h("div", { class: "toolbar" }, h("span", { class: "muted", text: "Send:" }), keyBtns, pasteBtn,
-      h("span", { class: "spacer" }), reconnectBtn,
+      h("span", { class: "spacer" }), h("label", { class: "inline" }, "Screen", lookSel), reconnectBtn,
       document.body.classList.contains("popout") ? null
         : h("button", { class: "btn", type: "button", text: "Pop out",
           onclick: () => import("./guest.js").then((m) => m.popOut(name, "console")) }),
       h("button", { class: "btn", type: "button", text: "Download log", onclick: download })),
-    frame);
+    box);
 
   let ws = null;
   let typing = false;
@@ -64,6 +90,7 @@ export function consoleView(name, store) {
     typing = s.typing;
     if (!typing) stopPaste();       // never finish a paste after the keyboard went away
     term.options.disableStdin = !typing;
+    setLamps(Boolean(s.running), typing);
     for (const b of [...keyBtns, pasteBtn]) b.disabled = !typing;
     banner.classList.toggle("typing", typing);
     const others = s.viewers > 1 ? ` · ${s.viewers - 1} other viewer${s.viewers > 2 ? "s" : ""}` : "";
@@ -117,6 +144,7 @@ export function consoleView(name, store) {
       if (closed || ws !== mine) return;
       stopPaste();
       typing = false;
+      setLamps(false, false);
       term.options.disableStdin = true;
       for (const b of [...keyBtns, pasteBtn]) b.disabled = true;
       if (!bannerText.textContent.includes("not running")) {
@@ -159,11 +187,25 @@ export function consoleView(name, store) {
     text.focus();
   }
 
-  const onResize = () => { try { fit.fit(); } catch (e) { /* not visible */ } };
+  // The largest font that shows the whole 80 x 24 screen in the room there
+  // is; below the smallest size the screen scrolls sideways instead.
+  function sizeScreen() {
+    const pop = document.body.classList.contains("popout");
+    const width = Math.max(200, box.clientWidth - 80);
+    const height = Math.max(240, window.innerHeight - (pop ? 150 : 330));
+    const f = fontFor(look, width, height);
+    term.options.fontFamily = f.family;
+    term.options.lineHeight = f.lineHeight;
+    term.options.fontSize = f.size;
+  }
+  const onResize = () => sizeScreen();
   window.addEventListener("resize", onResize);
-  requestAnimationFrame(() => {
+  requestAnimationFrame(async () => {
+    // xterm.js measures the font when it opens, so it must have loaded.
+    try { await document.fonts.load('20px "emuctl VT"'); } catch (e) { /* the fallback, then */ }
+    if (closed) return;
     term.open(screen);
-    onResize();
+    sizeScreen();
     connect();
   });
 

@@ -48,9 +48,12 @@ WRITE_TIMEOUT = 30          # seconds a page may take to accept an event
 # Inline styles are allowed because xterm.js writes its colours and sizes
 # into <style> elements it makes. Scripts are not: they come from our own
 # files only. The page builds everything with textContent, so there is no
-# markup from the server in which a style could be injected.
+# markup from the server in which a style could be injected. Images may be
+# blob: URLs, which only our own scripts can make: the screen thumbnail is
+# fetched as a timed refresh (so it does not keep a session alive) and shown
+# from one.
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-       "img-src 'self' data:; "
+       "img-src 'self' data: blob:; "
        "font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
        "form-action 'self'")
 ROLE_RANK = {"viewer": 0, "operator": 1, "admin": 2}

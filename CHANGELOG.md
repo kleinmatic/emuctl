@@ -16,6 +16,11 @@
   most a minute old.
 - Read-only API tokens for scripts (`emuctl web token add <name>`), and
   `/metrics` in Prometheus' format.
+- The Console tab looks like a terminal: an 80 x 24 screen in amber, green
+  or white phosphor (or the plain look, chosen per browser), in a font
+  after DEC's VT320 that has the line-drawing characters old systems draw
+  forms with. Lamps on the case show ON LINE, LOCAL and KBD LOCKED.
+- A phone layout: the guest list folds behind a "Guests" button.
 
 ## 0.4.0 (2026-11-22)
 

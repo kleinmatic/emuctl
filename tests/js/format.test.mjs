@@ -73,3 +73,21 @@ test("slow paste stops when the keys can no longer go", async () => {
   const r = slowSend("abcdef", 0, () => ++n < 3);
   assert.equal(await r.done, 2);
 });
+
+import * as ph from "../../src/emuctl/web/static/js/phosphor.js";
+
+test("the console's font size keeps 80 x 24 whole, and its pixels whole", () => {
+  assert.equal(ph.fontFor("amber", 1000, 700).size, 25);       // 800 x 600 fits
+  assert.equal(ph.fontFor("amber", 700, 700).size, 20);        // 640 wide
+  assert.equal(ph.fontFor("amber", 300, 300).size, 15);        // the least; it scrolls
+  assert.equal(ph.fontFor("amber", 1600, 500).size, 20);       // the height decides
+  assert.equal(ph.fontFor("plain", 2000, 2000).size, 15);
+});
+
+test("a phosphor turns every colour into its own", () => {
+  const t = ph.xtermTheme("green");
+  assert.equal(t.red, ph.PHOSPHORS.green.fg);
+  assert.equal(t.brightBlue, ph.PHOSPHORS.green.bright);
+  assert.equal(t.black, ph.PHOSPHORS.green.bg);
+  assert.equal(ph.xtermTheme("plain").red, undefined);         // plain keeps the colours
+});
