@@ -531,6 +531,38 @@ async def guest_console(request):
     return await console.serve(request, cfg, consoles, request.app[SESSIONS], can_type)
 
 
+DISPLAYS_PER_SESSION = 4
+
+
+@routes.get("/api/guests/{g}/display")
+@needs("operator")
+async def guest_display(request):
+    """WebSocket: the guest's screen through VNC, logged in by the daemon. An
+    operator's, since the keyboard and mouse go straight to the guest."""
+    from . import rfb
+    token = request["session"].token
+    displays = request.app[STATE]["displays"]
+    socks = displays.setdefault(token, set())
+    if len(socks) >= DISPLAYS_PER_SESSION:
+        raise json_error(web.HTTPTooManyRequests, "too many displays open for this session")
+    cfg = guest_config(request)
+    transport = request.transport
+    socks.add(transport)
+    try:
+        return await rfb.serve(request, cfg, request["user"].name, request.app[TASKS])
+    finally:
+        socks.discard(transport)
+        if not socks:
+            displays.pop(token, None)
+
+
+def end_displays(app, token):
+    """Logout or a removed user: cut that session's displays off at once."""
+    for transport in list(app[STATE]["displays"].get(token, ())):
+        if transport is not None:
+            transport.abort()
+
+
 @routes.get("/api/events")
 @needs("viewer")
 async def events(request):
@@ -578,6 +610,8 @@ async def sample_forever(app):
 
 async def end_streams(app):
     app[HUB].close_all()        # open pages would otherwise hold a shutdown for a minute
+    for token in list(app[STATE]["displays"]):
+        end_displays(app, token)
     await asyncio.gather(app[STATE]["consoles"].close_all(), app[TASKS].close())
     app[STATE]["login_pool"].shutdown(wait=False)
 
@@ -628,6 +662,8 @@ def make_app(settings, conf, users=None, sampler=None, background=True):
     }
     from .console import Consoles
     app[STATE]["consoles"] = Consoles(app[TASKS])
+    app[STATE]["displays"] = {}
+    app[SESSIONS].on_end.append(lambda token: end_displays(app, token))
     app[SESSIONS].on_end.append(app[STATE]["consoles"].end_session)
     for p in (conf.state_dir, conf.cert_path, conf.key_path, conf.users_path):
         if p not in data.PROTECTED:

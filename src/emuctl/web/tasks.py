@@ -28,7 +28,7 @@ DEADLINE = 450              # seconds: past a guest's stop (TimeoutStopSec=420),
 ACTIONS = {"start": [], "shutdown": [], "stop": ["--force"], "stop-now": ["--now"]}
 STOP_MODE = {"shutdown": "clean", "stop": "force", "stop-now": "now"}
 LABELS = {"start": "Start", "shutdown": "Shutdown", "stop": "Stop (force)", "stop-now": "Stop now",
-          "console": "Console"}
+          "console": "Console", "display": "Display"}
 
 
 @dataclass
