@@ -1,9 +1,9 @@
 # The web interface
 
 `emuctl web serve` runs a small web server that shows every guest on the
-host: its state, CPU, memory, disk and network use over the last hour, its
-emulated hardware, the host's bridges, and the logs. From it you can start
-and stop guests and use their serial consoles. It needs Linux with
+host: its state, CPU, memory, disk and network use over the last hour or
+day, its emulated hardware, the host's bridges, and the logs. From it you can
+start and stop guests and use their serial consoles and screens. It needs Linux with
 systemd (see [platforms.md](platforms.md)), Python 3.11 or newer, and
 `aiohttp`.
 
@@ -141,6 +141,20 @@ Only operators can open a display, since the keyboard and mouse go straight
 to the guest. The daemon connects only while the guest is running, and asks
 the VNC server to let several viewers share the screen.
 
+## Scripts and monitoring
+
+For a script, or Prometheus, make a read-only API token instead of a user:
+
+```sh
+sudo emuctl web token add prometheus     # prints the token, once
+sudo emuctl web token list
+sudo emuctl web token revoke prometheus
+```
+
+Send it as `Authorization: Bearer <token>`. It can read everything a viewer
+can (the JSON API and `/metrics`, in Prometheus' format) and change nothing.
+[api.md](api.md#api-tokens) has the routes and a Prometheus job.
+
 ## Who can reach it
 
 The daemon listens on every address on port 8600, as Proxmox does on 8006.
@@ -162,8 +176,10 @@ The daemon looks at every guest every 5 seconds, whether or not a page is
 open: one `systemctl show` for all running guests and a few small file reads
 each. It connects to a guest's `guest_addr` at most every 30 seconds. The
 host's network report, which runs `ip`, `bridge` and `ethtool`, is made only
-while a page shows it. It keeps one hour of history in memory; a restart
-starts the graphs again.
+while a page shows it. It keeps the last hour of samples in memory, and the
+last day as one-minute averages, written to `history_file` every five
+minutes (about 100 KB a guest). A guest's screen thumbnail is one short VNC
+connection a minute, only while someone has that guest's summary open.
 
 ## When something is wrong
 

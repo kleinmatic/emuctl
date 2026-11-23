@@ -47,6 +47,14 @@ def devhost(d):
     for name, (tap, _, mac) in NICS.items():
         with open(os.path.join(d, "guests", f"{name}.conf"), "a") as fh:
             fh.write(f"nics = {tap}\nhw.machine = Fake Machine 3000\nhw.memory = 64 MB\n")
+    with open(os.path.join(d, "vax-notes.txt"), "w") as fh:
+        fh.write("vax: the reference VMS guest\n\n"
+                 "Logins\n  SYSTEM   the password is in the house password manager\n"
+                 "  FIELD    for the field service account\n\n"
+                 "Installed\n  DECnet Phase IV, TCP/IP Services 5.3, C 6.4\n\n"
+                 "Remember\n  Shut it down with Shutdown, not Stop: the disk is not journaled.\n")
+    with open(os.path.join(d, "guests", "vax.conf"), "a") as fh:
+        fh.write(f"notes = {os.path.join(d, 'vax-notes.txt')}\n")
 
 
 class FakeNet:
@@ -204,6 +212,10 @@ def screenshots(url, password, out):
         pg.goto(url + "#/host/network")
         pg.wait_for_timeout(2000)
         pg.screenshot(path=os.path.join(out, "web-host-network.png"), full_page=True)
+        pg.goto(url + "#/host/energy")
+        pg.wait_for_selector("text=CPU-hours")
+        pg.wait_for_timeout(2000)
+        pg.screenshot(path=os.path.join(out, "web-host-energy.png"), full_page=True)
         pg.goto(url + "#/g/alpha/summary")
         pg.wait_for_selector(".chart")
         pg.wait_for_timeout(2500)
@@ -226,7 +238,7 @@ def screenshots(url, password, out):
         pg.goto(url + "#/g/twin/summary")
         pg.wait_for_timeout(2500)
         pg.screenshot(path=os.path.join(out, "web-refused.png"), full_page=True)
-        for tab in ("network", "hardware", "logs"):
+        for tab in ("network", "hardware", "logs", "notes"):
             pg.goto(url + f"#/g/vax/{tab}")
             pg.wait_for_timeout(2000)
             pg.screenshot(path=os.path.join(out, f"web-guest-{tab}.png"), full_page=True)

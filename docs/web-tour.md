@@ -44,17 +44,33 @@ a guest whose network card has not been seen on its bridge.
 **Network** has each bridge as a table: its members, whether each link is
 up, and the guests using it. **Tasks** lists the last 200 tasks.
 
+![The host's energy view](images/web-host-energy.png)
+
+**Energy** shows what each guest costs: how long it has been up, its CPU
+now, its average over the last hour and day (counting only the time it was
+up), and the CPU-hours it used in the last day. Above, how much of the host's
+CPU the guests use now and over the day.
+
 ## A guest
 
 ![A guest's summary](images/web-guest.png)
 
 The title bar shows the guest's state, its OS and emulator, and the action
-buttons. The tabs are Summary, Console, Network, Hardware and Logs.
+buttons. The tabs are Summary, Console, Display (for a guest with a screen),
+Network, Hardware, Logs and Notes (for a guest with a `notes` file).
 
 **Summary** has the guest's state and how it stops, its disk images, graphs
-of CPU, memory, disk I/O and network traffic for the last hour, its network
-interface, the hardware read from the emulator's config, and the last lines
-of its console. [monitoring.md](monitoring.md) says what each number means.
+of CPU, memory, disk I/O and network traffic, its network interface, the
+hardware read from the emulator's config, and the last lines of its console.
+**Graphs** switches between the last hour (a point every 5 seconds) and the
+last day (a point a minute). [monitoring.md](monitoring.md) says what each
+number means.
+
+Anything `emuctl check` finds wrong with the guest's conf is listed under
+**Checks**, as the web daemon's account sees it. A guest with a display has
+a **Screen** thumbnail, at most a minute old; click it for the Display tab.
+A guest whose conf says `locked = <reason>` is marked "locked", and Start is
+greyed out with that reason.
 
 ## Starting and stopping
 
@@ -90,6 +106,15 @@ running. [stopping.md](stopping.md) explains what each stop does to the guest.
 The guest's serial console, shared with `emuctl console` and anyone else
 looking. It opens with the last part of the console log, then shows what the
 guest prints as it happens.
+
+The screen is 80 columns by 24 lines, as the guests' consoles are, in a
+terminal's case. **Screen** chooses amber, green or white phosphor, or a
+plain look; the choice is kept in your browser. The phosphor looks use a
+font after DEC's VT320 that has the line-drawing characters old systems
+draw forms and menus with. The lamps under the screen show **ON LINE**
+while the page is connected, **LOCAL** when it is not, and **KBD LOCKED**
+while your keys are not being sent. On a narrow screen it scrolls sideways
+rather than shrink past reading.
 
 - It opens **watching**: what you type is not sent. Press **Take keyboard**
   to type; the banner turns blue and says so. Only one person types at a
@@ -145,12 +170,18 @@ cards, then each config file as written.
 **Logs** shows either the console log or the supervisor's log (what
 `emuctl log` shows), the last 100 to 5000 lines.
 
+![A guest's notes](images/web-guest-notes.png)
+
+**Notes** shows the text file the guest's conf names with `notes`: how to
+log in, what is installed, what to remember. The page only shows it; edit
+the file on the host.
+
 ## Dark, and on a phone
 
 ![Dark](images/web-guest-dark.png)
 
 The page follows the browser's light or dark setting; the switch in the top
-bar overrides it for that browser. On a narrow screen the guest list moves
-above the content:
+bar overrides it for that browser. On a phone the guest list folds away
+behind **Guests** in the top bar:
 
 ![On a phone](images/web-phone.png)
