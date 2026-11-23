@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // The graphical console: noVNC on a WebSocket to the daemon, which has
 // already logged in to the guest's VNC server. No password here.
-import RFB from "../../vendor/novnc/core/rfb.js";
 import { guestPath } from "../api.js";
-import { h } from "../dom.js";
+import { h, overlay } from "../dom.js";
 import { isUp } from "../format.js";
 
-export function overlay(text) {
-  return h("div", { class: "screen-overlay" }, h("div", { class: "screen-note", text }));
-}
+// noVNC is loaded only when a display is opened, not with every page.
+let RFB = null;
 
 export function displayView(name, store) {
   const screen = h("div", { class: "display-screen", "aria-label": `Screen of ${name}` });
@@ -43,7 +41,8 @@ export function displayView(name, store) {
     if (veil) { veil.remove(); veil = null; }
   }
 
-  function connect() {
+  async function connect() {
+    if (closed) return;
     if (rfb) { rfb.disconnect(); rfb = null; }
     const row = store.row(name);
     if (row && !isUp(row.state)) {
@@ -55,6 +54,8 @@ export function displayView(name, store) {
     uncover();
     reconnect.classList.add("hidden");
     status.textContent = "Connecting…";
+    if (!RFB) RFB = (await import("../../vendor/novnc/core/rfb.js")).default;
+    if (closed) return;
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     rfb = new RFB(screen, `${proto}//${location.host}${guestPath(name, "/display")}`,
       { wsProtocols: ["binary"] });
@@ -66,14 +67,16 @@ export function displayView(name, store) {
       rfb.focus();
     });
     rfb.addEventListener("desktopname", (e) => { status.title = e.detail.name; });
+    const mine = rfb;
     rfb.addEventListener("disconnect", (e) => {
-      if (closed) return;
+      if (closed || rfb !== mine) return;
       cad.disabled = true;
       reconnect.classList.remove("hidden");
       status.textContent = "";
       cover(e.detail.clean
         ? `The display closed.`
-        : `Could not reach ${name}'s display. If the guest is running, the daemon's log says why.`);
+        : `Could not open ${name}'s display. It may not be running, or this login may have ` +
+          `too many displays open (four at most); the daemon's log says which.`);
       rfb = null;
     });
   }

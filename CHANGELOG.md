@@ -8,6 +8,8 @@
   sees the password.
 - A stopped guest's Console tab shows its last output under a grey overlay
   that says it is not running.
+- "Pop out" on the Console and Display tabs opens that screen alone in its
+  own window.
 
 ## 0.3.0 (2026-11-22)
 

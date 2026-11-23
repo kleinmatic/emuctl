@@ -4,9 +4,8 @@
 import { FitAddon } from "../../vendor/xterm/addon-fit.mjs";
 import { Terminal } from "../../vendor/xterm/xterm.mjs";
 import { get, guestPath } from "../api.js";
-import { h } from "../dom.js";
+import { h, overlay } from "../dom.js";
 import { slowSend } from "../keys.js";
-import { overlay } from "./display.js";
 
 const KEYS = [["Ctrl-P", "\x10"], ["Ctrl-E", "\x05"], ["Ctrl-C", "\x03"], ["Ctrl-]", "\x1d"]];
 

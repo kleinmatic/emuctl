@@ -239,7 +239,9 @@ label.inline { display: flex; align-items: center; gap: 8px; color: var(--muted)
 
 /* screens: a down guest's last output, or a display, under a note */
 .terminal-frame, .display-box { position: relative; }
+/* pointer-events: none, so the last output under it can still be scrolled and copied */
 .screen-overlay { position: absolute; inset: 0; background: rgba(110, 116, 128, 0.55);
+  pointer-events: none;
   display: flex; align-items: center; justify-content: center; border-radius: 4px; z-index: 5; }
 .screen-note { background: var(--panel); color: var(--text); border: 1px solid var(--line);
   border-radius: 4px; padding: 10px 16px; font-weight: 500; max-width: 80%; text-align: center; }

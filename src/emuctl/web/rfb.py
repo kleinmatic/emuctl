@@ -99,16 +99,25 @@ async def login(reader, writer, auth, password=None):
 
 
 async def greet_browser(ws, receive):
-    """The server side of the handshake with noVNC: version 3.8, no password."""
+    """The server side of the handshake with the browser: no password. Speaks
+    whichever of 3.3, 3.7 and 3.8 the client answers with (noVNC says 3.8)."""
     await ws.send_bytes(b"RFB 003.008\n")
     hello = await receive(12)
-    if not hello.startswith(b"RFB 003."):
+    try:
+        minor = int(hello[8:11]) if hello.startswith(b"RFB 003.") else -1
+    except ValueError:
+        minor = -1
+    if minor < 3:
         raise RfbError("the browser does not speak VNC")
+    if minor < 7:
+        await ws.send_bytes(struct.pack(">I", NONE))       # 3.3: the server picks
+        return
     await ws.send_bytes(bytes([1, NONE]))
     choice = await receive(1)
     if choice != bytes([NONE]):
         raise RfbError("the browser chose a security type that was not offered")
-    await ws.send_bytes(struct.pack(">I", 0))
+    if minor >= 8:
+        await ws.send_bytes(struct.pack(">I", 0))          # 3.8 confirms even for None
 
 
 class FrameReader:
@@ -127,6 +136,7 @@ class FrameReader:
         return out
 
 
+USER_INPUT = (4, 5, 6, 255)  # KeyEvent, PointerEvent, ClientCutText, QEMU extended key
 SESSION_CHECK = 30           # seconds between checks that the session is still alive
 CLOSE_TIMEOUT = 2
 
@@ -220,7 +230,10 @@ async def _pipe(ws, reader, writer, sessions, token):
     try:
         async for msg in ws:
             if msg.type == WSMsgType.BINARY:
-                if sessions.get(token) is None:  # using the screen counts as activity
+                # Keys and the mouse count as activity; noVNC's own update
+                # requests do not, or an open screen would keep a session alive.
+                touch = bool(msg.data) and msg.data[0] in USER_INPUT
+                if sessions.get(token, touch=touch) is None:
                     break
                 writer.write(msg.data)
                 await writer.drain()

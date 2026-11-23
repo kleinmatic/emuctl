@@ -43,3 +43,8 @@ export function kv(pairs) {
   }
   return box;
 }
+
+// A note laid over a screen: a stopped guest's last output, or a display.
+export function overlay(text) {
+  return h("div", { class: "screen-overlay" }, h("div", { class: "screen-note", text }));
+}

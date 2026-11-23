@@ -546,9 +546,12 @@ async def guest_display(request):
     cfg = guest_config(request)
     socks = displays.setdefault(token, set())
     if len(socks) >= DISPLAYS_PER_SESSION:
+        log.info("refused a display of %s for %s: %d already open", request["guest"],
+                 request["user"].name, DISPLAYS_PER_SESSION)
         raise json_error(web.HTTPTooManyRequests, "too many displays open for this session")
     row = find_row(request.app[SAMPLER].rows, request["guest"])
-    running = row is None or row["state"] not in ("down", "crashed", "error")
+    running = row is not None and row["state"] in ("starting", "booting", "stuck", "ready",
+                                                    "degraded", "halted")
     transport = request.transport
     socks.add(transport)
     try:

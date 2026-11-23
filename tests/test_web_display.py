@@ -170,6 +170,7 @@ async def site(aiohttp_client, settings, tmp_path, monkeypatch):
     conf = WebConf(tls=False, users_file=users, task_log=str(tmp_path / "tasks.log"))
     app = webapp.make_app(settings, conf, sampler=Sampler(settings, probe=lambda *a, **k: False),
                           background=False)
+    app[webapp.SAMPLER].rows = [{"name": "g1", "state": "ready"}, {"name": "g2", "state": "ready"}]
     c = await aiohttp_client(app)
     c.origin = f"http://{c.host}:{c.port}"
     yield c, vnc
@@ -252,13 +253,17 @@ async def test_a_reset_from_the_guest_closes_the_page(site):
 
 
 async def test_a_hostile_refusal_is_cleaned_up(site, tmp_path, caplog):
+    import logging
+    caplog.set_level(logging.INFO, logger="emuctl.web")
     c, vnc = site
     vnc.reason = b"\xff\xfe\x1b[31mFAKE\nINFO root logged in" * 20
     (tmp_path / "g1" / "vnc.pass").write_text("wrong\n")
     ws = await open_display(c, await session(c))
     msg = await asyncio.wait_for(ws.receive(), 5)
     assert msg.type == WSMsgType.CLOSE and ws.close_code == 4000
-    assert "\x1b" not in caplog.text and "\nINFO root" not in caplog.text
+    assert "refused the password" in caplog.text
+    for text in (caplog.text, msg.extra):
+        assert "\x1b" not in text and "\nINFO root" not in text
 
 
 async def test_a_stopped_guest_is_not_connected_to(site):
@@ -289,3 +294,47 @@ async def test_logout_cuts_the_display(site):
     await c.post("/api/logout", headers=h)
     msg = await asyncio.wait_for(ws.receive(), 5)
     assert msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR)
+
+
+async def test_only_keys_and_the_mouse_keep_the_session_alive(site):
+    c, _ = site
+    ws = await open_display(c, await session(c))
+    await handshake(ws)
+    (s,) = c.app[webapp.SESSIONS]._by_token.values()
+    s.seen -= 1000
+    idle = s.seen
+    await ws.send_bytes(struct.pack(">BBHHHH", 3, 1, 0, 0, 640, 480))   # FramebufferUpdateRequest
+    await take(ws, 5)
+    assert s.seen == idle
+    await ws.send_bytes(struct.pack(">BBxxI", 4, 1, 0x61))              # KeyEvent
+    await take(ws, 5)
+    assert s.seen > idle
+    await ws.close()
+
+
+async def test_a_guest_the_sampler_has_not_seen_is_not_connected_to(site):
+    c, vnc = site
+    c.app[webapp.SAMPLER].rows = [{"name": "g1", "state": "stopping"}]
+    ws = await open_display(c, await session(c))
+    msg = await asyncio.wait_for(ws.receive(), 5)
+    assert msg.type == WSMsgType.CLOSE and "not running" in (msg.extra or "")
+
+
+@pytest.mark.parametrize("version,offer,choose,result", [
+    (b"RFB 003.003\n", struct.pack(">I", 1), None, None),
+    (b"RFB 003.007\n", bytes([1, 1]), b"\x01", None),
+    (b"RFB 003.008\n", bytes([1, 1]), b"\x01", b"\0\0\0\0"),
+])
+async def test_browser_side_speaks_the_clients_version(site, version, offer, choose, result):
+    c, _ = site
+    ws = await open_display(c, await session(c))
+    assert await take(ws, 12) == b"RFB 003.008\n"
+    await ws.send_bytes(version)
+    assert await take(ws, len(offer)) == offer
+    if choose:
+        await ws.send_bytes(choose)
+    if result:
+        assert await take(ws, 4) == result
+    await ws.send_bytes(b"\x01")
+    assert await take(ws, len(INIT)) == INIT
+    await ws.close()

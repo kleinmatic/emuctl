@@ -219,3 +219,47 @@ def test_console_types_at_the_guest(page, devhost_daemon):
     assert "dropped" not in page.locator(".xterm-rows").inner_text()
     page.click(".console-banner button:has-text('Release keyboard')")
     page.wait_for_selector(".console-banner:has-text('Viewing')")
+
+
+def test_display_tab_and_pop_out(page, devhost_daemon, tmp_path):
+    """noVNC under the page's CSP, against a fake VNC server; then Pop out."""
+    base, password = devhost_daemon
+    import re
+    work = tmp_path / "dh"
+    port = free_ports(1)[0]
+    (work / "vnc.pass").write_text("hunter22\n")
+    with open(work / "guests" / "vax.conf", "a") as fh:
+        fh.write(f"display = vnc://127.0.0.1:{port}\ndisplay_password_file = {work}/vnc.pass\n")
+    vnc = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(__file__), "..",
+                                                         "fake_vnc.py"),
+                            str(port), str(work / "vnc.pass"), "C06020"])
+    errors = []
+    page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    try:
+        page.goto(base + "/")
+        page.fill("input[name=user]", "dev")
+        page.fill("input[name=password]", password)
+        page.click("button[type=submit]")
+        page.wait_for_selector("table.data")
+        page.goto(base + "/#/g/vax/summary")
+        page.click(".titlebar button:has-text('Start')")
+        wait_state(page, "ready")
+        page.goto(base + "/#/g/vax/display")
+        page.wait_for_selector(".display .toolbar:has-text('Connected')", timeout=15000)
+        page.wait_for_function("""() => {
+            const c = document.querySelector('.display-screen canvas');
+            if (!c || !c.width) return false;
+            const d = c.getContext('2d').getImageData(10, 10, 1, 1).data;
+            return d[0] > 150 && d[1] > 60 && d[1] < 140 && d[2] < 80; }""", timeout=10000)
+        with page.context.expect_page() as info:
+            page.click(".display button:has-text('Pop out')")
+        pop = info.value
+        pop.wait_for_selector(".display .toolbar:has-text('Connected')", timeout=15000)
+        assert re.search(r"#/pop/vax/display$", pop.url)
+        assert not pop.locator(".bar").is_visible()
+        assert pop.locator(".display button:has-text('Pop out')").count() == 0
+        pop.close()
+        assert errors == []
+    finally:
+        vnc.terminate()
+        vnc.wait(5)

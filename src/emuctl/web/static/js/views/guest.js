@@ -243,6 +243,11 @@ export function guestView(name, tab, store) {
 
 // A console or display alone in its own window ("Pop out").
 export function popView(name, tab, store) {
+  if (!store.row(name) || !["console", "display"].includes(tab)) {
+    return { el: h("div", { class: "content" }, h("div", { class: "error-banner",
+      text: `No ${["console", "display"].includes(tab) ? tab : "screen"} for a guest called ${name}.` })),
+    close() {} };
+  }
   const inner = tab === "display" ? displayView(name, store) : consoleView(name, store);
   const head = h("div", { class: "pop-head" }, h("strong", { text: name }),
     h("span", { class: "muted", text: tab === "display" ? "display" : "console" }));
@@ -251,6 +256,8 @@ export function popView(name, tab, store) {
 
 export function popOut(name, tab) {
   const size = tab === "display" ? "width=1100,height=900" : "width=900,height=620";
-  window.open(`/#/pop/${encodeURIComponent(name)}/${tab}`, `emuctl-${name}-${tab}`,
-    `${size},noopener`);
+  // A named window, so a second click brings the same one back rather than
+  // opening another (each display holds one of the session's four).
+  const w = window.open(`/#/pop/${encodeURIComponent(name)}/${tab}`, `emuctl-${name}-${tab}`, size);
+  if (w) { w.opener = null; w.focus(); }
 }

@@ -41,7 +41,9 @@ const search = document.getElementById("search");
 let view = null;
 
 function route() {
-  const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
+  const parts = location.hash.replace(/^#\/?/, "").split("/").map((p) => {
+    try { return decodeURIComponent(p); } catch (e) { return ""; }
+  });
   if (parts[0] === "g" && parts[1]) return { kind: "guest", name: parts[1], tab: parts[2] || "summary" };
   if (parts[0] === "pop" && parts[1]) return { kind: "pop", name: parts[1], tab: parts[2] || "console" };
   return { kind: "host", tab: parts[0] === "host" && parts[1] ? parts[1] : "summary" };
@@ -75,6 +77,7 @@ function show() {
     document.title = `${r.name} · ${r.tab}`;
     view = popView(r.name, r.tab, store);
   } else {
+    document.title = `emuctl · ${store.host ? store.host.hostname : ""}`;
     view = r.kind === "guest" ? guestView(r.name, r.tab, store) : hostView(r.tab, store);
   }
   clear(main).append(view.el);

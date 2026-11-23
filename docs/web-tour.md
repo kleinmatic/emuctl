@@ -101,6 +101,7 @@ guest prints as it happens.
 - **Paste slowly** sends text one character at a time, 20 ms apart by
   default, for old consoles that drop characters typed quickly.
 - **Download log** saves the console log.
+- **Pop out** opens the console in its own window.
 
 On es40 guests the console sometimes holds back a prompt until the next
 key arrives. If you expected a prompt and it has not appeared, press Enter
@@ -113,9 +114,16 @@ you close the page, and the next person to open it inherits your session.
 
 For a guest whose emulator has a VNC server, the **Display** tab shows its
 screen. You do not type a VNC password: the daemon logs in for you. Click
-the screen to give it the keyboard and mouse. **Scale to fit** shrinks a
-large screen to the window; **Ctrl-Alt-Del** and **Full screen** do what
-they say. A stopped guest's screen shows a note instead.
+the screen to give it the keyboard and mouse. **Scale to fit** sizes the
+screen to the window, larger or smaller; **Ctrl-Alt-Del** and **Full screen**
+do what they say. A stopped guest's screen shows a note instead.
+
+## Popping a screen out
+
+**Pop out**, on the Console and Display tabs, opens that screen alone in its
+own window, with nothing around it, the way Proxmox does. A second click
+brings the same window back rather than opening another. Each open display
+counts against a login's four, so close windows you are done with.
 
 ## Network, Hardware and Logs
 

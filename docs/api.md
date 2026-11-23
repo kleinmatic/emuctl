@@ -198,8 +198,11 @@ that speaks VNC over a WebSocket. The daemon has already logged in to the
 guest's VNC server; it offers the client RFB 3.8 with no password, then
 passes bytes through both ways. The guest's conf must have `display`. The
 socket closes with code 4000 and a reason when the display cannot be
-reached, refuses the password, or the session ends. A session may have four
-displays open. Opening one is a task (`note`).
+reached, refuses the password, or the guest is not running; logout or an
+ended session cuts it off. A session may have four displays open; a fifth is
+refused with 429 before the upgrade. Only keys, the mouse and the clipboard
+count as activity for the session, not the client's own update requests.
+Opening one is a task (`note`).
 
 ## Live updates
 

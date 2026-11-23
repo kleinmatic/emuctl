@@ -30,8 +30,10 @@ The daemon logs in to a guest's VNC server with the password from the
 guest's `display_password_file` and gives the browser a VNC session that
 needs no password. The password stays on the host: it is not sent to the
 browser, logged or put in the task log. The daemon connects only to the
-address in the guest's conf, and only while the guest is running, so that
-nothing else listening on that port while the guest is down gets the login.
+address in the guest's conf, and only while the daemon's last sample shows
+the guest running, so that nothing else listening on that port while the
+guest is down gets the login. An open screen does not keep a session alive
+by itself: only keys, the mouse and the clipboard count as activity.
 VNC's own password check uses DES and is weak; treat the VNC port itself as
 reachable only from the host.
 
