@@ -240,3 +240,17 @@ export function guestView(name, tab, store) {
   render();
   return { el, close() { closed = true; store.listeners.delete(onRows); if (term) term.close(); if (screen) screen.close(); } };
 }
+
+// A console or display alone in its own window ("Pop out").
+export function popView(name, tab, store) {
+  const inner = tab === "display" ? displayView(name, store) : consoleView(name, store);
+  const head = h("div", { class: "pop-head" }, h("strong", { text: name }),
+    h("span", { class: "muted", text: tab === "display" ? "display" : "console" }));
+  return { el: h("div", { class: "content pop" }, head, inner.el), close: () => inner.close() };
+}
+
+export function popOut(name, tab) {
+  const size = tab === "display" ? "width=1100,height=900" : "width=900,height=620";
+  window.open(`/#/pop/${encodeURIComponent(name)}/${tab}`, `emuctl-${name}-${tab}`,
+    `${size},noopener`);
+}

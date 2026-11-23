@@ -8,7 +8,7 @@ import { clear, h } from "./dom.js";
 import { stateClass } from "./format.js";
 import { applyTheme, currentTheme, toggleTheme } from "./theme.js";
 import { hostView } from "./views/host.js";
-import { guestView } from "./views/guest.js";
+import { guestView, popView } from "./views/guest.js";
 import { taskPanel } from "./views/tasks.js";
 
 applyTheme();
@@ -43,6 +43,7 @@ let view = null;
 function route() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
   if (parts[0] === "g" && parts[1]) return { kind: "guest", name: parts[1], tab: parts[2] || "summary" };
+  if (parts[0] === "pop" && parts[1]) return { kind: "pop", name: parts[1], tab: parts[2] || "console" };
   return { kind: "host", tab: parts[0] === "host" && parts[1] ? parts[1] : "summary" };
 }
 
@@ -68,7 +69,14 @@ function renderTree() {
 function show() {
   const r = route();
   if (view && view.close) view.close();
-  view = r.kind === "guest" ? guestView(r.name, r.tab, store) : hostView(r.tab, store);
+  // A popped-out console or display: that screen alone, nothing around it.
+  document.body.classList.toggle("popout", r.kind === "pop");
+  if (r.kind === "pop") {
+    document.title = `${r.name} · ${r.tab}`;
+    view = popView(r.name, r.tab, store);
+  } else {
+    view = r.kind === "guest" ? guestView(r.name, r.tab, store) : hostView(r.tab, store);
+  }
   clear(main).append(view.el);
   renderTree();
 }

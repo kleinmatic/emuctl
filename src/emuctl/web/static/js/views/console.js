@@ -38,6 +38,9 @@ export function consoleView(name, store) {
   const el = h("div", { class: "console" }, banner,
     h("div", { class: "toolbar" }, h("span", { class: "muted", text: "Send:" }), keyBtns, pasteBtn,
       h("span", { class: "spacer" }), reconnectBtn,
+      document.body.classList.contains("popout") ? null
+        : h("button", { class: "btn", type: "button", text: "Pop out",
+          onclick: () => import("./guest.js").then((m) => m.popOut(name, "console")) }),
       h("button", { class: "btn", type: "button", text: "Download log", onclick: download })),
     frame);
 

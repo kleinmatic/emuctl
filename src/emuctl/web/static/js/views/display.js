@@ -23,7 +23,11 @@ export function displayView(name, store) {
     onclick: () => box.requestFullscreen && box.requestFullscreen() });
   const el = h("div", { class: "display" },
     h("div", { class: "toolbar" }, h("label", { class: "inline" }, scaleBox, "Scale to fit"),
-      cad, full, reconnect, h("span", { class: "spacer" }), status),
+      cad, full, reconnect,
+      document.body.classList.contains("popout") ? null
+        : h("button", { class: "btn", type: "button", text: "Pop out",
+          onclick: () => import("./guest.js").then((m) => m.popOut(name, "display")) }),
+      h("span", { class: "spacer" }), status),
     box);
   let rfb = null;
   let veil = null;
