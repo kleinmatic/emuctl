@@ -109,6 +109,14 @@ again.
 When you are done, log out of the guest. The console stays logged in after
 you close the page, and the next person to open it inherits your session.
 
+## The display
+
+For a guest whose emulator has a VNC server, the **Display** tab shows its
+screen. You do not type a VNC password: the daemon logs in for you. Click
+the screen to give it the keyboard and mouse. **Scale to fit** shrinks a
+large screen to the window; **Ctrl-Alt-Del** and **Full screen** do what
+they say. A stopped guest's screen shows a note instead.
+
 ## Network, Hardware and Logs
 
 ![A guest's interfaces](images/web-guest-network.png)

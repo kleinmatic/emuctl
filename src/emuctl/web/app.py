@@ -11,7 +11,8 @@ Security rules (AGENTS.md) enforced here, in one place:
   7  login limit .................... login(), auth.LoginLimiter
   8  CSP ............................ add_security_headers
   9  task log ....................... tasks.py; every action route goes through it,
-                                     and console.py notes each keyboard take
+                                     console.py notes each keyboard take and rfb.py
+                                     each display opened
 Every route handler is marked @public or @needs(role). A handler with
 neither is refused, so a route cannot be added open by mistake.
 """
@@ -542,14 +543,17 @@ async def guest_display(request):
     from . import rfb
     token = request["session"].token
     displays = request.app[STATE]["displays"]
+    cfg = guest_config(request)
     socks = displays.setdefault(token, set())
     if len(socks) >= DISPLAYS_PER_SESSION:
         raise json_error(web.HTTPTooManyRequests, "too many displays open for this session")
-    cfg = guest_config(request)
+    row = find_row(request.app[SAMPLER].rows, request["guest"])
+    running = row is None or row["state"] not in ("down", "crashed", "error")
     transport = request.transport
     socks.add(transport)
     try:
-        return await rfb.serve(request, cfg, request["user"].name, request.app[TASKS])
+        return await rfb.serve(request, cfg, request["user"].name, request.app[TASKS],
+                               request.app[SESSIONS], token, running)
     finally:
         socks.discard(transport)
         if not socks:

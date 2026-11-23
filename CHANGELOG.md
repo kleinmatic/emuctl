@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- The web page has a Display tab for guests whose emulator has a VNC
+  server (`display` in the conf). The daemon logs in with the password in
+  `display_password_file` and shows the screen with noVNC; the browser never
+  sees the password.
+- A stopped guest's Console tab shows its last output under a grey overlay
+  that says it is not running.
+
 ## 0.3.0 (2026-11-22)
 
 ### Breaking

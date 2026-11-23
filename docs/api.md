@@ -189,6 +189,18 @@ of the guest's `console.log`, then live output.
 The socket closes when the guest's console closes, on logout, or when the
 session ends. A session may have eight consoles open.
 
+## The display
+
+### `WS /api/guests/{guest}/display` (operator)
+
+A WebSocket carrying VNC (RFB) in binary frames, for noVNC or any client
+that speaks VNC over a WebSocket. The daemon has already logged in to the
+guest's VNC server; it offers the client RFB 3.8 with no password, then
+passes bytes through both ways. The guest's conf must have `display`. The
+socket closes with code 4000 and a reason when the display cannot be
+reached, refuses the password, or the session ends. A session may have four
+displays open. Opening one is a task (`note`).
+
 ## Live updates
 
 ### `GET /api/events` (viewer)

@@ -23,15 +23,11 @@ def test_des_vectors(key, plain, cipher):
     assert des.encrypt_block(bytes.fromhex(key), bytes.fromhex(plain)).hex().upper() == cipher
 
 
-def test_vnc_key_reverses_each_byte():
-    # "\x01" reversed is 0x80; the key is the password padded to 8 bytes.
-    challenge = bytes(range(16))
-    want = des.encrypt_block(bytes([0x80] + [0] * 7), challenge[:8]) + \
-        des.encrypt_block(bytes([0x80] + [0] * 7), challenge[8:])
-    assert des.vnc_response("\x01", challenge) == want
-    assert des.vnc_response("12345678ignored", challenge) == des.vnc_response("12345678", challenge)
-    with pytest.raises(ValueError):
-        des.encrypt_block(b"short", b"8 bytes!")
+def test_vnc_response_matches_openssl():
+    # Computed with OpenSSL's DES, not this code: password, challenge, response.
+    assert des.vnc_response("s3cret", bytes(range(16))).hex() == \
+        "fc9a2bb8546a63388eb45b530d3a6337"
+    assert des.vnc_response("12345678ignored", bytes(16)) == des.vnc_response("12345678", bytes(16))
 
 
 if sys.version_info < (3, 11):
@@ -55,9 +51,11 @@ INIT = struct.pack(">HH16xI", 640, 480, 4) + b"test"
 class FakeVnc:
     """A VNC server: version `minor`, security `kind`, then a ServerInit."""
 
-    def __init__(self, minor=8, kind=2, password=VNC_PASSWORD):
-        self.minor, self.kind, self.password = minor, kind, password
+    def __init__(self, minor=8, kind=2, password=VNC_PASSWORD, reason=b"bad"):
+        self.minor, self.kind, self.password, self.reason = minor, kind, password, reason
         self.after_init = bytearray()
+        self.shared = None
+        self.writers = []
         self.challenge = os.urandom(16)
 
     async def handle(self, r, w):
@@ -76,13 +74,14 @@ class FakeVnc:
                 w.write(struct.pack(">I", 0 if ok else 1))
                 if not ok:
                     if self.minor == 8:
-                        w.write(struct.pack(">I", 3) + b"bad")
+                        w.write(struct.pack(">I", len(self.reason)) + self.reason)
                     await w.drain()
                     w.close()
                     return
             elif self.minor == 8:
                 w.write(struct.pack(">I", 0))
-            await r.readexactly(1)                  # ClientInit
+            self.shared = (await r.readexactly(1))[0]     # ClientInit
+            self.writers.append(w)
             w.write(INIT)
             await w.drain()
             while True:
@@ -199,11 +198,11 @@ async def test_browser_gets_a_passwordless_vnc_and_then_the_guest(site):
     assert await take(ws, 2) == bytes([1, 1])          # one type offered: None
     await ws.send_bytes(b"\x01")
     assert await take(ws, 4) == b"\0\0\0\0"
-    await ws.send_bytes(b"\x01")                       # ClientInit, passed through
+    await ws.send_bytes(b"\x00")                       # ClientInit, not shared...
     assert await take(ws, len(INIT)) == INIT
+    assert vnc.shared == 1                             # ...but the guest is asked to share
     await ws.send_bytes(b"keys")
     assert await take(ws, 9) == b"echo:keys"
-    assert b"s3cret" not in vnc.after_init
     await ws.close()
     notes = [t for t in c.app[webapp.TASKS].list() if t["action"] == "display"]
     assert notes and notes[0]["user"] == "alice"
@@ -232,11 +231,61 @@ async def test_display_needs_an_operator_session_and_our_origin(site):
         assert e.value.status == code
 
 
+async def handshake(ws):
+    await take(ws, 12)
+    await ws.send_bytes(b"RFB 003.008\n")
+    await take(ws, 2)
+    await ws.send_bytes(b"\x01")
+    await take(ws, 4)
+    await ws.send_bytes(b"\x01")
+    await take(ws, len(INIT))
+
+
+async def test_a_reset_from_the_guest_closes_the_page(site):
+    c, vnc = site
+    ws = await open_display(c, await session(c))
+    await handshake(ws)
+    for w in vnc.writers:
+        w.transport.abort()
+    msg = await asyncio.wait_for(ws.receive(), 5)
+    assert msg.type == WSMsgType.CLOSE and "the display closed" in (msg.extra or "")
+
+
+async def test_a_hostile_refusal_is_cleaned_up(site, tmp_path, caplog):
+    c, vnc = site
+    vnc.reason = b"\xff\xfe\x1b[31mFAKE\nINFO root logged in" * 20
+    (tmp_path / "g1" / "vnc.pass").write_text("wrong\n")
+    ws = await open_display(c, await session(c))
+    msg = await asyncio.wait_for(ws.receive(), 5)
+    assert msg.type == WSMsgType.CLOSE and ws.close_code == 4000
+    assert "\x1b" not in caplog.text and "\nINFO root" not in caplog.text
+
+
+async def test_a_stopped_guest_is_not_connected_to(site):
+    c, vnc = site
+    c.app[webapp.SAMPLER].rows = [{"name": "g1", "state": "down"}]
+    ws = await open_display(c, await session(c))
+    msg = await asyncio.wait_for(ws.receive(), 5)
+    assert msg.type == WSMsgType.CLOSE and "not running" in (msg.extra or "")
+    assert vnc.shared is None
+
+
+async def test_an_expired_session_ends_the_display(site, monkeypatch):
+    c, _ = site
+    monkeypatch.setattr(rfb, "SESSION_CHECK", 0.05)
+    ws = await open_display(c, await session(c))
+    await handshake(ws)
+    for s in c.app[webapp.SESSIONS]._by_token.values():
+        s.created -= auth.MAX_AGE + 1
+    msg = await asyncio.wait_for(ws.receive(), 5)
+    assert msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSED)        # cut off either way
+
+
 async def test_logout_cuts_the_display(site):
     c, _ = site
     h = await session(c)
     ws = await open_display(c, h)
-    await take(ws, 12)
+    await handshake(ws)
     await c.post("/api/logout", headers=h)
     msg = await asyncio.wait_for(ws.receive(), 5)
     assert msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSED, WSMsgType.ERROR)

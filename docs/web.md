@@ -109,6 +109,32 @@ and the daemon logs a warning saying so at every start. Only do this behind
 something that adds TLS for you, or on a network where nobody else can
 listen.
 
+## A guest's screen
+
+A guest whose emulator has its own VNC server (gxemul's `--vnc`, QEMU's
+`-vnc`) gets a **Display** tab. Give the guest's conf the server's address,
+and if it asks for a password, a file holding it:
+
+```
+display = vnc://127.0.0.1:5906
+display_password_file = /etc/emuctl/display/<guest>.pass
+```
+
+The daemon logs in to the VNC server itself and passes the picture to your
+browser, which never sees the password. So the password file must be
+readable by `emuctl-web`, and by nobody else who does not need it. Keep it
+out of `/etc/emuctl/env/`: the daemon never reads anything there. One way:
+
+```sh
+sudo install -d -m 750 -o root -g emuctl-web /etc/emuctl/display
+sudo sh -c 'umask 027; cat > /etc/emuctl/display/<guest>.pass'   # type it, then Ctrl-D
+sudo chgrp emuctl-web /etc/emuctl/display/<guest>.pass
+```
+
+Only operators can open a display, since the keyboard and mouse go straight
+to the guest. The daemon connects only while the guest is running, and asks
+the VNC server to let several viewers share the screen.
+
 ## Who can reach it
 
 The daemon listens on every address on port 8600, as Proxmox does on 8006.

@@ -35,12 +35,17 @@ def read_password(path):
     raw = data.tail_bytes(path, limit=1024) if path else None
     if raw is None:
         raise RfbError("the display password file cannot be read by the web daemon")
+    if len(raw) == 1024:
+        raise RfbError("the display password file is too long to be a VNC password file")
     return raw.decode("latin-1").split("\n", 1)[0].rstrip("\r")
 
 
 async def _read_reason(reader):
+    """A server's refusal text: printable ASCII only, so it cannot forge log
+    lines, and short enough for a WebSocket close frame."""
     (n,) = struct.unpack(">I", await reader.readexactly(4))
-    return (await reader.readexactly(min(n, MAX_REASON))).decode("latin-1", "replace")
+    raw = await reader.readexactly(min(n, MAX_REASON))
+    return "".join(chr(b) if 32 <= b < 127 else "?" for b in raw[:100])
 
 
 async def login(reader, writer, auth, password=None):
@@ -122,15 +127,28 @@ class FrameReader:
         return out
 
 
-async def serve(request, cfg, user, tasks):
+SESSION_CHECK = 30           # seconds between checks that the session is still alive
+CLOSE_TIMEOUT = 2
+
+
+def close_reason(text):
+    return text.encode("ascii", "replace")[:120]
+
+
+async def serve(request, cfg, user, tasks, sessions, token, running=True):
     """The WebSocket handler's body. `request` has passed every middleware."""
     guest = request["guest"]
-    ws = web.WebSocketResponse(heartbeat=30, max_msg_size=1 << 20, protocols=("binary",))
+    ws = web.WebSocketResponse(heartbeat=30, max_msg_size=1 << 20, protocols=("binary",),
+                               compress=False)
     await ws.prepare(request)
     writer = None
     try:
         if not cfg.display:
             raise RfbError(f"{guest} has no display")
+        if not running:
+            # Not even a connection attempt: with the guest down, anyone could
+            # be listening on its display port, and would get the login.
+            raise RfbError(f"{guest} is not running")
         password = (await asyncio.to_thread(read_password, cfg.display_password_file)
                     if cfg.display_auth == "vnc" else None)
         host, port = cfg.display
@@ -139,46 +157,75 @@ async def serve(request, cfg, user, tasks):
                                                     HANDSHAKE_TIMEOUT)
         except (OSError, asyncio.TimeoutError):
             raise RfbError(f"nothing answers on {guest}'s display; is it running?")
+        frames = FrameReader(ws)
         try:
             await asyncio.wait_for(login(reader, writer, cfg.display_auth, password),
                                    HANDSHAKE_TIMEOUT)
-            await asyncio.wait_for(greet_browser(ws, FrameReader(ws)), HANDSHAKE_TIMEOUT)
+            await asyncio.wait_for(greet_browser(ws, frames), HANDSHAKE_TIMEOUT)
+            # ClientInit's shared flag, set to 1 whatever the browser asked, so
+            # one page cannot throw everyone else off the guest's screen.
+            await asyncio.wait_for(frames(1), HANDSHAKE_TIMEOUT)
         except asyncio.TimeoutError:
             raise RfbError("the display handshake timed out")
         except asyncio.IncompleteReadError:
             raise RfbError("the display closed the connection during login")
+        except OSError as exc:
+            raise RfbError(f"the display connection failed: {exc.strerror or exc}")
+        writer.write(b"\x01" + bytes(frames.buf))
+        await writer.drain()
         tasks.note(user, guest, "display", "opened the display")
-        await _pipe(ws, reader, writer)
+        await _pipe(ws, reader, writer, sessions, token)
     except RfbError as exc:
         log.info("display of %s for %s: %s", guest, user, exc)
         if not ws.closed:
-            await ws.close(code=4000, message=str(exc)[:120].encode())
-    except (ConnectionResetError, asyncio.CancelledError):
+            await ws.close(code=4000, message=close_reason(str(exc)))
+    except (OSError, asyncio.CancelledError):
         pass
     finally:
         if writer is not None:
             writer.close()
         if not ws.closed:
-            await ws.close()
+            try:
+                await asyncio.wait_for(ws.close(), CLOSE_TIMEOUT)
+            except (asyncio.TimeoutError, OSError, asyncio.CancelledError):
+                if request.transport is not None:
+                    request.transport.abort()
     return ws
 
 
-async def _pipe(ws, reader, writer):
+async def _pipe(ws, reader, writer, sessions, token):
+    """Bytes both ways until either side goes, or the session ends."""
     async def down():
-        while True:
-            chunk = await reader.read(65536)
-            if not chunk:
-                break
-            await ws.send_bytes(chunk)
-        await ws.close()
+        try:
+            while True:
+                chunk = await reader.read(65536)
+                if not chunk:
+                    break
+                await ws.send_bytes(chunk)
+        except OSError:
+            pass                                # a reset from the server
+        finally:
+            if not ws.closed:
+                await ws.close(code=4000, message=b"the display closed")
+
+    async def watch():
+        while not ws.closed:
+            await asyncio.sleep(SESSION_CHECK)
+            if sessions.get(token, touch=False) is None:
+                await ws.close(code=4000, message=b"session ended")
+                return
 
     pump = asyncio.create_task(down())
+    watcher = asyncio.create_task(watch())
     try:
         async for msg in ws:
             if msg.type == WSMsgType.BINARY:
+                if sessions.get(token) is None:  # using the screen counts as activity
+                    break
                 writer.write(msg.data)
                 await writer.drain()
             elif msg.type in (WSMsgType.ERROR, WSMsgType.CLOSE):
                 break
     finally:
         pump.cancel()
+        watcher.cancel()

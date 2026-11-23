@@ -10,7 +10,8 @@ the page as root access to every guest.
   supervisor log, and the emulator config files the conf names (shown as
   written, so anything in them, a password included, is visible); the host's
   bridges and interfaces.
-- Act: start and stop guests through systemd, and type at their consoles. The polkit rule allows
+- Act: start and stop guests through systemd, type at their consoles, and
+  use their screens (Display tab) with keyboard and mouse. The polkit rule allows
   `start`, `stop` and `kill` on `emuctl-guest@*.service` units only.
 - It cannot edit confs, run commands on the host, or read `/etc/emuctl/env/`.
 
@@ -22,6 +23,17 @@ and the page says who has it. Every take and release is in the task log
 with the user's name. The page shows the guest's recent console output, so
 anything the guest printed (a password echoed by an old OS, say) is visible
 to everyone who can open the page.
+
+## The display
+
+The daemon logs in to a guest's VNC server with the password from the
+guest's `display_password_file` and gives the browser a VNC session that
+needs no password. The password stays on the host: it is not sent to the
+browser, logged or put in the task log. The daemon connects only to the
+address in the guest's conf, and only while the guest is running, so that
+nothing else listening on that port while the guest is down gets the login.
+VNC's own password check uses DES and is weak; treat the VNC port itself as
+reachable only from the host.
 
 ## Who can use it
 

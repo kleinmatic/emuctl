@@ -95,7 +95,7 @@ monitoring commands and the web page what the guest is and where to look.
 | `nics` | found in `config` | Host network interfaces the guest uses (taps or veths), comma-separated. Only needed when emuctl cannot find them in the emulator's config. |
 | `display` | none | A VNC server showing the guest's screen, as `vnc://host:port`. |
 | `display_auth` | `vnc` if a password file is set, else `none` | How to log in to that VNC server: `none` or `vnc` (a VNC password). |
-| `display_password_file` | none | A file holding the VNC password, relative to `workdir`. Make it readable only by the accounts that need it. |
+| `display_password_file` | none | A file holding the VNC password on its first line, relative to `workdir`. The web page's Display tab reads it to log in for you, so the `emuctl-web` account must be able to read it; nothing else should. It may not be under `/etc/emuctl/env/`, which the web daemon never reads. See [web.md](web.md#a-guests-screen). |
 | `notes` | none | A text file about the guest, shown by the web page. |
 | `hw.<label>` | none | A hardware line stated by hand, such as `hw.memory = 128 MB` or `hw.cpu = R3000, 25 MHz`. Shown as given, and used in place of anything read from `config` under the same label. |
 
