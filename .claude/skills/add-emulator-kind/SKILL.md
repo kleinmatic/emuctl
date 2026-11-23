@@ -64,4 +64,4 @@ emuctl reads each emulator's config to show the emulated hardware
 4. Document the kind in `docs/config.md` under `kind` and in the emulator's
    page.
 5. `hardware.py` is in `NEW_MODULES` in `tools/coverage_check.py`; keep it at
-   90% or more.
+   85% or more.

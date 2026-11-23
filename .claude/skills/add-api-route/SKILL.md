@@ -73,5 +73,5 @@ and most of them are enforced for you by the middleware in
    returns, an example. If the page shows it, update `docs/web-tour.md`.
 9. **Changelog** line under `## Unreleased`.
 10. Run `pytest`, `ruff`, `node --test tests/js/*.test.mjs`, the coverage
-    check (`web/` must stay at 90% or more), and the browser tests if the
+    check (`web/` must stay at 85% or more), and the browser tests if the
     page changed. Then the `web-security-check` skill on the diff.

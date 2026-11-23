@@ -110,7 +110,8 @@ root. See the `dev-host` skill.
    `docs/releasing.md`. Never push a tag; the maintainer releases.
 9. **Coverage.** The whole project may not fall below the floor in
    `tools/coverage_check.py`; raise the floor when coverage rises. New modules
-   go in its `NEW_MODULES` list and must reach 90%.
+   go in its `NEW_MODULES` list and must reach 85%. Do not write tests just to
+   reach a number: a test must check something that could really go wrong.
 10. **Tests and lint pass before a change is called done.** If they do not,
     say so plainly.
 

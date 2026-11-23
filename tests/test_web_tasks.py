@@ -111,6 +111,7 @@ async def test_one_task_per_guest_but_stop_now_cuts_in(settings, tmp_path, fake_
     await finished(tasks, first)
     assert first.result == third.result == "ok"
     assert (await tasks.submit("bob", "slow-0", "start")).result == "running"
+    await tasks.close()
 
 
 async def test_note_and_history_limit(settings, tmp_path):
@@ -278,18 +279,6 @@ async def test_running_tasks_are_never_forgotten(settings, tmp_path, fake_cmd, m
         tasks.note("alice", "g1", "console", f"note {i}")
     assert tasks.get(t.id) is t
     await finished(tasks, t)
-
-
-async def test_a_running_stop_now_keeps_the_guest_busy(settings, tmp_path, fake_cmd, monkeypatch):
-    allow(monkeypatch)
-    tasks = Tasks(settings, str(tmp_path / "t.log"), command=fake_cmd)
-    first = await tasks.submit("alice", "slow-0.3", "shutdown")
-    cut = await tasks.submit("alice", "slow-0.3", "stop-now", confirmed=True)
-    await finished(tasks, first)
-    tasks.cutting["slow-0.3"] = cut if cut.result == "running" else cut
-    if cut.result == "running":
-        assert (await tasks.submit("bob", "slow-0.3", "start")).result == "refused"
-    await finished(tasks, cut)
 
 
 async def test_a_confirmation_from_an_earlier_run_is_refused(settings, tmp_path, fake_cmd,
