@@ -11,7 +11,8 @@ export function stateBadge(row) {
   return h("span", {},
     h("span", { class: `st ${stateClass(row.state)}` },
       h("span", { class: "dot", "aria-hidden": "true" }), row.state),
-    row.detail ? h("span", { class: "detail", text: row.detail }) : null);
+    row.detail ? h("span", { class: "detail", text: row.detail }) : null,
+    row.locked ? h("span", { class: "lock", title: `Starts are refused: ${row.locked}`, text: "locked" }) : null);
 }
 
 function stat(label, value, fraction, note) {

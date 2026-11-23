@@ -96,7 +96,8 @@ monitoring commands and the web page what the guest is and where to look.
 | `display` | none | A VNC server showing the guest's screen, as `vnc://host:port`. |
 | `display_auth` | `vnc` if a password file is set, else `none` | How to log in to that VNC server: `none` or `vnc` (a VNC password). |
 | `display_password_file` | none | A file holding the VNC password on its first line, relative to `workdir`. The web page's Display tab reads it to log in for you, so the `emuctl-web` account must be able to read it; nothing else should. It may not be under `/etc/emuctl/env/`, which the web daemon never reads. See [web.md](web.md#a-guests-screen). |
-| `notes` | none | A text file about the guest, shown by the web page. |
+| `notes` | none | A text file about the guest, shown on the web page's Notes tab. |
+| `locked` | none | A reason the guest must not be started, such as `locked = disk image being copied`. Every start is refused with that reason: `emuctl start`, the web page and the service manager alike. Stopping is not affected. Remove the line to allow starts again. |
 | `hw.<label>` | none | A hardware line stated by hand, such as `hw.memory = 128 MB` or `hw.cpu = R3000, 25 MHz`. Shown as given, and used in place of anything read from `config` under the same label. |
 
 `emuctl info <guest> --hardware` (add `--json` for scripts) shows what emuctl

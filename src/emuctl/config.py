@@ -24,7 +24,7 @@ KNOWN = set(REQUIRED) | {
     "boot_timeout", "console_timeout", "guest_addr", "guest_port",
     "stop_mode", "monitor", "stop_command", "stop_timeout", "stop_wake", "halt_grace",
     "exclusive_with", "kind", "config", "nics", "display", "display_auth",
-    "display_password_file", "notes",
+    "display_password_file", "notes", "locked",
 }
 # Program names that are SIMH simulators, for guessing `kind`.
 SIMH_PREFIXES = ("vax", "microvax", "rtvax", "infoserver", "pdp", "altair", "nova", "eclipse",
@@ -97,6 +97,7 @@ class GuestConfig:
     display_password_file: object = None
     notes: object = None                                # absolute path or None
     hw: dict = field(default_factory=dict)              # label -> text, in conf order
+    locked: str = ""                                    # why it must not be started, or ""
 
     @property
     def clean_stop(self):
@@ -289,6 +290,7 @@ def parse_config(text):
         if kv.get("display_password_file") else None,
         notes=rel(kv["notes"]) if kv.get("notes") else None,
         hw=hw,
+        locked=kv.get("locked", ""),
     )
 
 

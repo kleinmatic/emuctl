@@ -35,7 +35,8 @@ def uptime_str(seconds):
 def guest_status(settings, name, probe=probe_guest):
     """A dict describing one guest. Never raises for a broken conf."""
     row = {"name": name, "node": "", "os": "", "emulator": "", "state": "error",
-           "uptime": None, "broker": None, "detail": ""}
+           "uptime": None, "broker": None, "detail": "",
+           "locked": ""}
     try:
         cfg = load_config(settings.conf_path(name))
     except (OSError, ConfigError) as exc:
@@ -45,6 +46,7 @@ def guest_status(settings, name, probe=probe_guest):
     state = effective_state(raw)
     raw = raw or {}
     row.update(node=cfg.node, os=cfg.os, emulator=cfg.emulator, broker=cfg.broker)
+    row["locked"] = cfg.locked
 
     if state == "ready" and cfg.guest_addr:
         if probe(cfg.guest_addr, cfg.guest_port):
@@ -149,4 +151,6 @@ def format_info(settings, name, probe=probe_guest):
     line("stop", how)
     if cfg.exclusive_with:
         line("exclusive", ", ".join(cfg.exclusive_with))
+    if cfg.locked:
+        line("locked", f"{cfg.locked}   (starts are refused)")
     return "\n".join(out)

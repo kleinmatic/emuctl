@@ -50,6 +50,13 @@ def test_start_refused_by_the_guard(settings, tmp_path):
     assert not plan.allowed and plan.code == 2 and "exclusive" in plan.message
 
 
+def test_a_locked_guest_is_refused_with_the_reason(settings, tmp_path):
+    add_guest(settings, tmp_path, extra="locked = disk image being copied")
+    plan = actions.plan_start(settings, "g1")
+    assert not plan.allowed and plan.code == 2
+    assert "locked: disk image being copied" in plan.message
+
+
 # --- plan_stop --------------------------------------------------------------
 
 @pytest.mark.parametrize("state,mode,allowed,cut", [

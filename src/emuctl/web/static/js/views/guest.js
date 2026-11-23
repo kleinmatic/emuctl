@@ -81,6 +81,7 @@ export function guestView(name, tab, store) {
       : (d.disks.length ? "cannot read the images" : "diskless");
     const status = h("section", { class: "card" }, h("h2", { text: "Status" }), kv([
       ["State", `${d.state}${d.detail ? ` · ${d.detail}` : ""}`],
+      ["Locked", d.locked ? `${d.locked} (starts are refused)` : null],
       ["Uptime", up ? longUptime(d.uptime) : DASH],
       ["Stop", d.stop_route],
       ["Exclusive with", d.exclusive_with.length ? d.exclusive_with.join(", ") : null],

@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Refuse a start that would put two emulators on one disk image.
 
-Three checks, run by the supervisor before it launches the emulator:
+Four checks, run by the supervisor before it launches the emulator:
+  0. the conf does not say `locked = <reason>`;
   1. no guest named in `exclusive_with` is running;
   2. no other process has one of this guest's disk images open (catches an
      emulator started by hand, outside emuctl);
@@ -72,8 +73,11 @@ def _lock(path, what):
 
 
 def check(cfg, settings, locks=None):
-    """Checks 1 and 2. With `locks`, also take a lock per disk image and append
+    """Checks 0, 1 and 2. With `locks`, also take a lock per disk image and append
     it. Raises GuardError."""
+    if cfg.locked:
+        raise GuardError(f"{cfg.name} is locked: {cfg.locked} (remove the locked line from "
+                         f"its conf to allow a start)")
     for peer in cfg.exclusive_with:
         try:
             load_config(settings.conf_path(peer))

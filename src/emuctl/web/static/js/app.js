@@ -63,7 +63,8 @@ function renderTree() {
     items.push(h("a", { class: `guest${r.kind === "guest" && r.name === g.name ? " current" : ""}`,
       href: guestHref(g.name, r.kind === "guest" ? r.tab : "summary") },
     h("span", { class: `dot ${stateClass(g.state)}`, "aria-hidden": "true" }),
-    h("span", { text: g.name }), h("span", { class: "state", text: g.state })));
+    h("span", { text: g.name }),
+    h("span", { class: "state", text: g.locked ? `${g.state} · locked` : g.state })));
   }
   clear(tree).append(...items);
 }

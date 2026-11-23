@@ -144,6 +144,8 @@ table.data tr:last-child td { border-bottom: 0; }
 .st-crashed, .st-error { color: var(--bad); }
 .st-crashed .dot, .st-error .dot, .dot.st-crashed, .dot.st-error { background: var(--bad); }
 .detail { color: var(--muted); margin-left: 8px; font-weight: 400; }
+.lock { margin-left: 8px; padding: 0 6px; border: 1px solid var(--warn); border-radius: 3px;
+  color: var(--warn); font-size: 11px; font-weight: 500; }
 
 /* network diagram */
 .bridges { display: flex; flex-direction: column; gap: 10px; font-family: var(--mono); font-size: 12px; }
