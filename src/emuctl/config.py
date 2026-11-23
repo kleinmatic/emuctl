@@ -262,6 +262,10 @@ def parse_config(text):
     if any(not label for label in hw):
         raise ConfigError("hw. keys need a label, such as hw.memory")
 
+    locked = kv.get("locked", "")
+    if locked.lower() in ("no", "false", "off", "0", "none"):
+        raise ConfigError(f"locked = {locked} would lock the guest: locked takes a reason; "
+                          f"remove the line to allow starts")
     halted = kv.get("halted")
     return GuestConfig(
         name=name, node=kv.get("node", name), os=kv.get("os", ""),
@@ -290,7 +294,7 @@ def parse_config(text):
         if kv.get("display_password_file") else None,
         notes=rel(kv["notes"]) if kv.get("notes") else None,
         hw=hw,
-        locked=kv.get("locked", ""),
+        locked=locked,
     )
 
 

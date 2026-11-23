@@ -46,8 +46,13 @@ export function guestView(name, tab, store) {
   let closed = false;
   let logState = { source: "console", lines: 200 };
   let shot = null;        // the screen thumbnail: {at, url} or {at, error}
-  async function thumbnail() {
-    if (shot && Date.now() - shot.at < 60000) return shot;
+  let taking = null;
+  function thumbnail() {
+    if (shot && Date.now() - shot.at < 60000) return Promise.resolve(shot);
+    if (!taking) taking = takeThumbnail().finally(() => { taking = null; });
+    return taking;
+  }
+  async function takeThumbnail() {
     const old = shot;
     try {
       shot = { at: Date.now(), url: await image(guestPath(name, "/thumbnail")) };
@@ -116,13 +121,19 @@ export function guestView(name, tab, store) {
     ]));
     const cards = [status];
     if (d.display && up && store.session.role !== "viewer") {
-      const t = await thumbnail();
-      cards.push(h("section", { class: "card" },
-        h("h2", {}, "Screen ", h("span", { class: "muted", text: "at most a minute old" })),
-        t.url
+      // The card now, the picture when it comes: a stalled display must not
+      // hold up the rest of the summary.
+      const slot = h("div", { class: "muted", text: shot && shot.url ? "" : "Taking a picture…" });
+      const show = (t) => {
+        clear(slot).append(t.url
           ? h("a", { href: `#/g/${encodeURIComponent(name)}/display`, title: "Open the display" },
             h("img", { class: "thumb", src: t.url, alt: `${name}'s screen` }))
-          : h("div", { class: "muted", text: `No picture: ${t.error}` })));
+          : `No picture: ${t.error}`);
+      };
+      if (shot) show(shot);
+      thumbnail().then((t) => { if (!closed) show(t); });
+      cards.push(h("section", { class: "card" },
+        h("h2", {}, "Screen ", h("span", { class: "muted", text: "at most a minute old" })), slot));
     }
     if (chk && (chk.errors.length || chk.warnings.length)) {
       cards.push(h("section", { class: "card" },

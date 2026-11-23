@@ -14,7 +14,7 @@ import zlib
 from .rfb import HANDSHAKE_TIMEOUT, RfbError, login, read_password
 
 WIDTH = 320                 # pixels across the thumbnail
-MAX_PIXELS = 4096 * 4096    # a bigger screen is refused rather than read
+MAX_SIDE = 2560             # a wider or taller screen is refused rather than read
 EVERY = 60                  # seconds a picture is reused for
 RETRY = 10                  # seconds a failure is reused for
 FRAME_TIMEOUT = 15
@@ -43,8 +43,8 @@ async def grab(reader, writer):
     await reader.readexactly(16)                            # the server's pixel format
     (n,) = struct.unpack(">I", await reader.readexactly(4))
     await skip(reader, n)                                   # its desktop name
-    if not 0 < w * h <= MAX_PIXELS:
-        raise RfbError(f"the screen is {w} x {h}; too big for a thumbnail")
+    if not (0 < w <= MAX_SIDE and 0 < h <= MAX_SIDE):
+        raise RfbError(f"the screen is {w} x {h}; not a size for a thumbnail")
     writer.write(b"\x00\x00\x00\x00" + PIXEL_FORMAT          # SetPixelFormat
                  + struct.pack(">BxHi", 2, 1, 0)             # SetEncodings: raw only
                  + struct.pack(">BBHHHH", 3, 0, 0, 0, w, h))  # a full update, please
@@ -54,16 +54,21 @@ async def grab(reader, writer):
         kind = (await reader.readexactly(1))[0]
         if kind == 0:                                       # FramebufferUpdate
             _, rects = struct.unpack(">BH", await reader.readexactly(3))
+            area = 0
             for _ in range(rects):
                 x, y, rw, rh, enc = struct.unpack(">HHHHi", await reader.readexactly(12))
                 if enc != 0:
                     raise RfbError(f"the display sent encoding {enc}, not raw")
-                if x + rw > w or y + rh > h:
-                    raise RfbError("the display sent a rectangle off the screen")
+                if not rw or not rh or x + rw > w or y + rh > h:
+                    raise RfbError("the display sent an empty or off-screen rectangle")
+                area += rw * rh
+                if area > 2 * w * h:                        # more than the screen, twice over
+                    raise RfbError("the display sent more picture than its screen holds")
                 body = await reader.readexactly(rw * rh * 4)
                 for row in range(rh):
                     at = ((y + row) * w + x) * 4
                     fb[at:at + rw * 4] = body[row * rw * 4:(row + 1) * rw * 4]
+                await asyncio.sleep(0)                      # let the rest of the daemon run
             return w, h, bytes(fb)
         if kind == 1:                                       # SetColourMapEntries
             _, _, count = struct.unpack(">BHH", await reader.readexactly(5))

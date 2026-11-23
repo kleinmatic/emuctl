@@ -271,3 +271,18 @@ def test_energy(settings, tmp_path, monkeypatch):
     assert g1["cpu_pct"] == 50.0 and g1["cpu_1h"] == 50.0 and g1["cpu_24h"] == 50.0
     assert g1["up_minutes_24h"] == 1 and g1["cpu_hours_24h"] == round(0.5 / 60, 2)
     assert g2["cpu_1h"] is None and g2["cpu_hours_24h"] == 0
+
+
+def test_a_missing_conf_does_not_wipe_the_day_at_once(settings, tmp_path):
+    add_guest(settings, tmp_path, "g1")
+    clock = Clock()
+    s = Sampler(settings, clock=clock, wall=clock, probe=lambda *a, **k: False)
+    s.day["g1"] = sampler.deque([{"t": 50, "cpu_pct": 1.0, "mem_bytes": None, "io_read": None,
+                                  "io_write": None, "nics": {}}])
+    conf = settings.conf_path("g1")
+    os.rename(conf, conf + ".away")             # an editor saving by rename, say
+    s.tick()
+    assert "g1" in s.day
+    clock.t += sampler.KEEP
+    s.tick()
+    assert "g1" not in s.day                    # gone an hour: dropped

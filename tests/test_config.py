@@ -88,3 +88,9 @@ def test_monitor_and_freeze_modes():
     assert parse_config(MINIMAL + "stop_mode = freeze\n").clean_stop
     c = parse_config(MINIMAL + "stop_mode = monitor\nmonitor = /run/q.sock\n")
     assert c.monitor_sock == "/run/q.sock"
+
+
+def test_locked_takes_a_reason_not_a_no():
+    assert parse_config(MINIMAL + "locked = disk being copied\n").locked == "disk being copied"
+    with pytest.raises(ConfigError, match="takes a reason"):
+        parse_config(MINIMAL + "locked = no\n")

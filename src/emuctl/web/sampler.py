@@ -11,6 +11,7 @@ minutes and when the daemon stops, and read back when it starts.
 import json
 import logging
 import os
+import tempfile
 import threading
 import time
 from collections import deque
@@ -87,6 +88,8 @@ class Sampler:
         self.history_file = history_file
         self.day = {}               # name -> deque of one-minute points
         self._minute = {}           # name -> the minute (wall // 60) of its last sample
+        self._gone = {}             # name -> when its conf was first missed (day history)
+        self._save_lock = threading.Lock()
         self.probe = probe or CachedProbe()
         self.root, self.host_factory = root, host_factory
         self.rows = []
@@ -149,9 +152,18 @@ class Sampler:
             for gone in set(self.history) - set(names):
                 del self.history[gone]
                 self._last.pop(gone, None)
+            # A guest's day is dropped only when its conf has been gone an
+            # hour: a listing that fails for a moment, or an editor saving by
+            # rename, must not wipe a day of history (and then save that).
+            now_wall = int(self.wall())
+            for name in names:
+                self._gone.pop(name, None)
             for gone in set(self.day) - set(names):
-                del self.day[gone]
-                self._minute.pop(gone, None)
+                first = self._gone.setdefault(gone, now_wall)
+                if now_wall - first >= KEEP:
+                    del self.day[gone]
+                    self._minute.pop(gone, None)
+                    del self._gone[gone]
         self.rows = rows
         return rows
 
@@ -197,9 +209,10 @@ class Sampler:
         """Per guest: how long it has been up and what CPU it has used, now,
         over the hour and over the day. CPU is in percent of one host CPU;
         averages count only the time the guest was up."""
+        since = int(self.wall()) - DAY      # the deque may span more after a restart
         with self._lock:
             fine = {n: [p["cpu_pct"] for p in d] for n, d in self.history.items()}
-            day = {n: [p["cpu_pct"] for p in d] for n, d in self.day.items()}
+            day = {n: [p["cpu_pct"] for p in d if p["t"] > since] for n, d in self.day.items()}
         out = []
         for row in self.rows:
             name = row["name"]
@@ -225,14 +238,26 @@ class Sampler:
             guests = {n: list(d) for n, d in self.day.items()}
         body = json.dumps({"version": 1, "step": MINUTE, "guests": guests},
                           separators=(",", ":"))
-        tmp = f"{self.history_file}.tmp"
-        try:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "w") as fh:
-                fh.write(body)
-            os.replace(tmp, self.history_file)
-        except OSError as exc:
-            log.warning("could not save the graph history to %s: %s", self.history_file, exc)
+        with self._save_lock:           # the timed save and the one at shutdown
+            tmp = None
+            try:
+                fd, tmp = tempfile.mkstemp(dir=os.path.dirname(self.history_file) or ".",
+                                           prefix=".history.")
+                with os.fdopen(fd, "w") as fh:
+                    fh.write(body)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                os.replace(tmp, self.history_file)
+                tmp = None
+            except OSError as exc:
+                log.warning("could not save the graph history to %s: %s",
+                            self.history_file, exc)
+            finally:
+                if tmp:
+                    try:
+                        os.unlink(tmp)
+                    except OSError:
+                        pass
 
     def load(self):
         """Read history_file back, keeping the last day for guests that still exist."""
@@ -250,10 +275,11 @@ class Sampler:
             log.warning("ignored the graph history in %s: %s", self.history_file, exc)
             return
         since = int(self.wall()) - DAY
-        known = set(self.settings.guests())
         with self._lock:
+            # Every guest in the file, even one whose conf is missing now: the
+            # first ticks drop it within the hour if it really is gone.
             for name, pts in guests.items():
-                if name not in known or not isinstance(pts, list):
+                if not isinstance(name, str) or not isinstance(pts, list):
                     continue
                 keep = [p for p in pts if isinstance(p, dict) and _valid_point(p)
                         and p["t"] > since]

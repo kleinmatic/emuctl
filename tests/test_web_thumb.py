@@ -86,6 +86,29 @@ async def test_long_text_is_read_past_and_too_much_refused():
             await thumb.snapshot(cfg_for(port))
 
 
+async def test_empty_or_endless_rectangles_are_refused():
+    async def server(rects):
+        async def client_(r, wr):
+            for say, hear in ((b"RFB 003.008\n", 12), (bytes([1, 1]), 1), (bytes(4), 1)):
+                wr.write(say)
+                await r.readexactly(hear)
+            wr.write(struct.pack(">HH", 4, 100) + bytes(16) + struct.pack(">I", 0))
+            await r.readexactly(38)
+            wr.write(struct.pack(">BxH", 0, len(rects)) + b"".join(
+                struct.pack(">HHHHi", *rc) + bytes(rc[2] * rc[3] * 4) for rc in rects))
+            await wr.drain()
+            await r.read()
+            wr.close()
+        srv = await asyncio.start_server(client_, "127.0.0.1", 0)
+        return srv, srv.sockets[0].getsockname()[1]
+    for rects, match in (([(0, 0, 0, 100, 0)] * 3, "empty"),
+                         ([(0, 0, 4, 100, 0)] * 3, "more picture")):
+        srv, port = await server(rects)
+        async with srv:
+            with pytest.raises(RfbError, match=match):
+                await thumb.snapshot(cfg_for(port))
+
+
 async def test_nothing_listening():
     srv = await asyncio.start_server(lambda r, w: None, "127.0.0.1", 0)
     port = srv.sockets[0].getsockname()[1]
