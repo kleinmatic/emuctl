@@ -106,7 +106,34 @@ authority, so trusting it in a browser trusts this daemon and nothing else.
 
 To use your own, for example from a homelab CA, set both `tls_cert` and
 `tls_key` to files the `emuctl-web` account can read. The daemon never
-replaces a certificate you named.
+replaces a certificate you named. `tls_cert` may hold the whole chain.
+
+With an ACME CA (step-ca, or any other), certbot can get and renew one. Its
+own files are readable by root only, so a deploy hook copies them where the
+daemon can read them and restarts it; logins survive the restart.
+
+```sh
+sudo certbot certonly --standalone --server https://<your CA>/acme/acme/directory \
+    --register-unsafely-without-email --agree-tos -d <host name>
+```
+
+`/etc/letsencrypt/renewal-hooks/deploy/emuctl-web`, mode 755:
+
+```sh
+#!/bin/sh
+set -eu
+live=/etc/letsencrypt/live/<host name>
+install -d -m 750 -o root -g emuctl-web /etc/emuctl/tls
+install -m 640 -o root -g emuctl-web "$live/fullchain.pem" /etc/emuctl/tls/web.crt
+install -m 640 -o root -g emuctl-web "$live/privkey.pem" /etc/emuctl/tls/web.key
+systemctl try-restart emuctl-web
+```
+
+Run the hook once by hand after the first certificate, then set
+`tls_cert = /etc/emuctl/tls/web.crt`, `tls_key = /etc/emuctl/tls/web.key`
+and `server_names = <host name>` in `web.conf`. `--standalone` needs port 80
+free; the CA must be able to reach it. The host must trust your CA's root for
+certbot to talk to it.
 
 ### Turning TLS off
 
