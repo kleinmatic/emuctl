@@ -2,7 +2,16 @@
 
 ## Unreleased
 
-- New: a web interface, `emuctl web serve` (docs/web.md). It needs Python
+### Breaking
+
+- `emuctl list` shows GUEST, STATE, UPTIME and DETAIL and fits in 80 columns.
+  The NODE, OS and EMULATOR columns are gone by default; `--node`, `--os` and
+  `--emulator` add them back, and `--usage` adds CPU% and MEM. A script that
+  reads the table should use `--json`, which is unchanged.
+
+### New
+
+- A web interface, `emuctl web serve` (docs/web.md). It needs Python
   3.11 and aiohttp. It shows the host, every guest with its state, CPU,
   memory, disk and network use over the last hour, the guest's hardware,
   network and logs, and the host's bridges and warnings, updated live. It
@@ -18,10 +27,6 @@
   scrollback; "Take keyboard" lets you type. It can send Ctrl-P, Ctrl-E,
   Ctrl-C and Ctrl-], paste slowly for consoles that drop fast input, and
   download the log.
-
-- `emuctl list` shows GUEST, STATE, UPTIME and DETAIL and fits in 80 columns.
-  `--node`, `--os` and `--emulator` add those columns back; `--usage` adds
-  CPU% and MEM. `--json` is unchanged.
 
 ## 0.2.0 (2026-11-22)
 
