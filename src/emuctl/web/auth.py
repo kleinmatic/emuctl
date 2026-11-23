@@ -262,14 +262,17 @@ class Session:
     created: float
     seen: float
     hash: str = ""              # SHA-256 of the password hash at login: a new password ends it
-    cookie: str = field(default="", repr=False)   # only on a new session, to send once
+    cookie: str = field(default="", repr=False)   # only until the login reply sets it
 
 
-def _valid_session(sid, v):
-    return (isinstance(sid, str) and re.fullmatch(r"[0-9a-f]{64}", sid) is not None
+def _valid_session(sid, v, now):
+    hexed = re.compile(r"[0-9a-f]{64}")
+    return (isinstance(sid, str) and hexed.fullmatch(sid) is not None
             and isinstance(v, dict) and isinstance(v.get("user"), str)
-            and isinstance(v.get("csrf"), str) and isinstance(v.get("hash"), str)
-            and all(isinstance(v.get(k), (int, float)) for k in ("created", "seen")))
+            and isinstance(v.get("csrf"), str) and len(v["csrf"]) >= 32
+            and isinstance(v.get("hash"), str) and hexed.fullmatch(v["hash"]) is not None
+            and all(isinstance(v.get(k), (int, float)) and not isinstance(v.get(k), bool)
+                    and 0 < v[k] <= now + 60 for k in ("created", "seen")))
 
 
 class Sessions:
@@ -294,7 +297,7 @@ class Sessions:
         s = Session(_digest(cookie), user, secrets.token_urlsafe(32), now, now,
                     _digest(getattr(u, "hash", "")), cookie)
         self._by_token[s.token] = s
-        self._prune(now)
+        self._prune(now, save=False)
         self.save()
         return s
 
@@ -322,16 +325,20 @@ class Sessions:
             s.seen = now
         return s
 
-    def end(self, sid):
+    def end(self, sid, save=True):
         if self._by_token.pop(sid, None) is not None:
             for cb in list(self.on_end):
                 cb(sid)
-            self.save()
+            if save:
+                self.save()
 
-    def _prune(self, now):
-        for sid, s in list(self._by_token.items()):
-            if now - s.seen > self.idle or now - s.created > self.max_age:
-                self.end(sid)
+    def _prune(self, now, save=True):
+        gone = [sid for sid, s in self._by_token.items()
+                if now - s.seen > self.idle or now - s.created > self.max_age]
+        for sid in gone:
+            self.end(sid, save=False)
+        if gone and save:
+            self.save()
 
     # --- across restarts ----------------------------------------------------------
 
@@ -340,10 +347,12 @@ class Sessions:
         logout, and from time to time for the idle clocks."""
         if not self.path:
             return
-        body = json.dumps({"version": 1, "sessions": {
-            sid: {"user": s.user, "csrf": s.csrf, "created": s.created, "seen": s.seen,
-                  "hash": s.hash} for sid, s in list(self._by_token.items())}})
         with self._save_lock:
+            # The snapshot inside the lock, so an older one can never be
+            # written over a newer one (a logout undone).
+            body = json.dumps({"version": 1, "sessions": {
+                sid: {"user": s.user, "csrf": s.csrf, "created": s.created, "seen": s.seen,
+                      "hash": s.hash} for sid, s in list(self._by_token.items())}})
             tmp = None
             try:
                 fd, tmp = tempfile.mkstemp(dir=os.path.dirname(self.path) or ".",
@@ -353,7 +362,13 @@ class Sessions:
                 os.replace(tmp, self.path)
                 tmp = None
             except OSError as exc:
-                log.warning("could not save the sessions to %s: %s", self.path, exc)
+                log.warning("could not save the sessions to %s: %s; removing it, so a "
+                            "restart logs everyone out rather than bring back an ended "
+                            "session", self.path, exc)
+                try:
+                    os.unlink(self.path)
+                except OSError:
+                    pass
             finally:
                 if tmp:
                     try:
@@ -366,20 +381,23 @@ class Sessions:
         if not self.path:
             return
         try:
-            fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW)
+            fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
             with os.fdopen(fd) as fh:
-                saved = json.load(fh)
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    raise ValueError("not a regular file")
+                saved = json.loads(fh.read(4 * 1024 * 1024))
             found = saved["sessions"] if saved.get("version") == 1 else {}
             if not isinstance(found, dict):
                 raise TypeError("sessions is not an object")
         except FileNotFoundError:
             return
-        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        except (OSError, ValueError, KeyError, TypeError, AttributeError,
+                RecursionError) as exc:
             log.warning("ignored the saved sessions in %s: %s", self.path, exc)
             return
         now = self.clock()
         for sid, v in found.items():
-            if (_valid_session(sid, v) and now - v["seen"] <= self.idle
+            if (_valid_session(sid, v, now) and now - v["seen"] <= self.idle
                     and now - v["created"] <= self.max_age):
                 self._by_token[sid] = Session(sid, v["user"], v["csrf"], v["created"],
                                               v["seen"], v["hash"])

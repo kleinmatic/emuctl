@@ -376,6 +376,7 @@ async def _login(request, app, addr, limiter):
     resp = web.json_response({"user": user.name, "role": user.role, "csrf": session.csrf})
     resp.set_cookie(COOKIE, session.cookie, httponly=True, secure=app[CONF].tls,
                     samesite="Strict", path="/")
+    session.cookie = ""         # from here on the daemon knows only its SHA-256
     return resp
 
 

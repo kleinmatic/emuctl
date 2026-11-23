@@ -346,7 +346,24 @@ def test_sessions_survive_a_restart_but_not_their_limits(tmp_path):
     gone = auth.Sessions(users, idle=100, clock=Clock(), path=path)
     gone.load()
     assert gone._by_token == {}
-    (tmp_path / "sessions.json").write_text('{"version": 1, "sessions": {"x": 1}}')
-    bad = auth.Sessions(users, path=path)
-    bad.load()
-    assert bad._by_token == {}
+    good = {"user": "alice", "csrf": "c" * 43, "hash": "a" * 64, "created": 5, "seen": 5}
+    for tampered in ({"x": 1}, {"b" * 64: {**good, "csrf": ""}},
+                     {"b" * 64: {**good, "seen": 1e12}}, {"b" * 64: {**good, "hash": "é"}}):
+        (tmp_path / "sessions.json").write_text(
+            '{"version": 1, "sessions": %s}' % __import__("json").dumps(tampered))
+        bad = auth.Sessions(users, idle=100, clock=lambda: 10, path=path)
+        bad.load()
+        assert bad._by_token == {}, tampered
+
+
+def test_a_failed_save_removes_the_file(tmp_path, monkeypatch):
+    users = types.SimpleNamespace(get={"alice": types.SimpleNamespace(hash="h")}.get)
+    path = tmp_path / "sessions.json"
+    s = auth.Sessions(users, path=str(path))
+    a = s.new("alice")
+    assert path.exists()
+    def full(**kw):
+        raise OSError("disk full")
+    monkeypatch.setattr(auth.tempfile, "mkstemp", full)
+    s.end(a.token)
+    assert not path.exists()
