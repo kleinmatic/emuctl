@@ -416,14 +416,17 @@ async def guest(request):
     return web.json_response(await asyncio.to_thread(data.guest_detail, s, name, row))
 
 
+WINDOWS = {"1h": 3600, "24h": 86400}
+
+
 @routes.get("/api/guests/{g}/usage")
 @needs("viewer")
 async def guest_usage(request):
     window = request.query.get("window", "1h")
-    if window != "1h":
-        raise json_error(web.HTTPBadRequest, "window must be 1h")
+    if window not in WINDOWS:
+        raise json_error(web.HTTPBadRequest, "window must be 1h or 24h")
     await current_rows(request.app)
-    return web.json_response(request.app[SAMPLER].series(request["guest"], 3600))
+    return web.json_response(request.app[SAMPLER].series(request["guest"], WINDOWS[window]))
 
 
 @routes.get("/api/guests/{g}/network")
@@ -629,13 +632,21 @@ async def events(request):
 
 # --- the application ------------------------------------------------------------
 
+SAVE_EVERY = 300        # seconds between writes of the graph history
+
+
 async def sample_forever(app):
     sampler, hub = app[SAMPLER], app[HUB]
+    loop = asyncio.get_running_loop()
+    saved = loop.time()
     while True:
         try:
             async with app[STATE]["tick"]:
                 rows = await asyncio.to_thread(sampler.tick)
             hub.publish("guests", rows)
+            if loop.time() - saved >= SAVE_EVERY:
+                saved = loop.time()
+                await asyncio.to_thread(sampler.save)
         except Exception:
             log.exception("sampling failed")
         await asyncio.sleep(sampler.interval)
@@ -650,6 +661,7 @@ async def end_streams(app):
 
 
 async def start_background(app):
+    await asyncio.to_thread(app[SAMPLER].load)
     app[STATE]["sampler_task"] = asyncio.create_task(sample_forever(app))
 
 
@@ -662,6 +674,7 @@ async def stop_background(app):
                 await task
             except asyncio.CancelledError:
                 pass
+    await asyncio.to_thread(app[SAMPLER].save)
 
 
 def known_names(conf):
@@ -680,7 +693,7 @@ def make_app(settings, conf, users=None, sampler=None, background=True):
     app[USERS] = users or Users(conf.users_path)
     app[SESSIONS] = Sessions(app[USERS])
     app[LIMITER] = LoginLimiter()
-    app[SAMPLER] = sampler or Sampler(settings)
+    app[SAMPLER] = sampler or Sampler(settings, history_file=conf.history_path)
     hub = Hub()
     app[HUB] = hub
     app[SESSIONS].on_end.append(hub.end_session)
@@ -698,8 +711,9 @@ def make_app(settings, conf, users=None, sampler=None, background=True):
     app[STATE]["displays"] = {}
     app[SESSIONS].on_end.append(lambda token: end_displays(app, token))
     app[SESSIONS].on_end.append(app[STATE]["consoles"].end_session)
-    for p in (conf.state_dir, conf.cert_path, conf.key_path, conf.users_path):
-        if p not in data.PROTECTED:
+    for p in (conf.state_dir, conf.cert_path, conf.key_path, conf.users_path,
+              conf.history_path):
+        if p and p not in data.PROTECTED:
             data.PROTECTED.append(p)
     app.on_response_prepare.append(add_security_headers)
     app.router.add_routes(routes)

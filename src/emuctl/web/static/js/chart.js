@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// A small line graph for the last hour, drawn as SVG.
+// A small line graph over a stretch of time, drawn as SVG.
 import { h, svg } from "./dom.js";
 import { clock, maxOf, niceMax, segments } from "./format.js";
 
 // series: [{label, values}] (one or two); t: epoch seconds; fmt: value -> text
-export function chart({ title, t, series, fmt, big, note, floor = 1, label }) {
+export function chart({ title, t, series, fmt, big, note, floor = 1, label, span = "the last hour", step = null }) {
   const max = niceMax(maxOf(...series.map((s) => s.values)), floor);
   const box = svg("svg", { viewBox: "0 0 300 80", preserveAspectRatio: "none", role: "img",
-    "aria-label": label || `${title} over the last hour, up to ${fmt(max)}` });
+    "aria-label": label || `${title} over ${span}, up to ${fmt(max)}` });
   series.forEach((s, i) => {
-    for (const seg of segments(s.values, max)) {
+    for (const seg of segments(s.values, max, 300, 80, t, step)) {
       const pts = seg.join(" ");
       if (i === 0 && series.length === 1) {
         const x0 = seg[0].split(",")[0];

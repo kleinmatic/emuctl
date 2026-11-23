@@ -45,6 +45,11 @@ test("graph maths", () => {
   assert.equal(segs.length, 2);
   assert.deepEqual(segs[0], ["0.0,80.0", "75.0,4.0"]);
   assert.deepEqual(f.segments([20], 10)[0], ["300.0,4.0"]);   // clipped to the top
+  // by time: the missing minutes between 120 and 600 break the line
+  const timed = f.segments([1, 1, 1, 1], 10, 300, 80, [0, 60, 120, 600], 60);
+  assert.equal(timed.length, 2);
+  assert.equal(timed[1][0].split(",")[0], "300.0");
+  assert.equal(timed[0][2].split(",")[0], "60.0");
 });
 
 import { slowSend } from "../../src/emuctl/web/static/js/keys.js";

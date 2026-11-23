@@ -83,17 +83,24 @@ export function niceMax(m, floor = 1) {
 
 // SVG polyline point lists for `values` drawn into a w x h box, one list
 // per unbroken run (a null is a gap: the guest was down or just restarted).
-export function segments(values, max, w = 300, h = 80) {
+// With `t` (seconds) and `step`, points are placed by time, and a run also
+// breaks where readings are missing (the daemon was not running).
+export function segments(values, max, w = 300, h = 80, t = null, step = null) {
   const out = [];
   let cur = [];
   const n = values.length;
+  const t0 = t && n ? t[0] : 0;
+  const width = t && n > 1 ? t[n - 1] - t0 : 0;
   values.forEach((v, i) => {
-    if (v === null || v === undefined) {
+    const late = t && step && i > 0 && t[i] - t[i - 1] > step * 2.5;
+    if (v === null || v === undefined || late) {
       if (cur.length) out.push(cur);
       cur = [];
-      return;
+      if (v === null || v === undefined) return;
     }
-    const x = n > 1 ? (i * w) / (n - 1) : w;
+    let x;
+    if (width > 0) x = ((t[i] - t0) * w) / width;
+    else x = n > 1 ? (i * w) / (n - 1) : w;
     const y = h - (Math.min(v, max) / max) * (h - 4);
     cur.push(`${x.toFixed(1)},${y.toFixed(1)}`);
   });

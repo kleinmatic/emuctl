@@ -179,6 +179,13 @@ table.data tr:last-child td { border-bottom: 0; }
 .btn.danger { border-color: var(--bad); color: var(--bad); }
 .btn.warn { border-color: var(--warn); color: var(--warn); font-weight: 600; }
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.btn[aria-pressed="true"] { background: var(--sel); border-color: var(--accent); }
+.segmented { gap: 0; }
+.segmented .muted { margin-right: 8px; }
+.segmented .btn { border-radius: 0; }
+.segmented .btn + .btn { border-left: 0; }
+.segmented .btn:first-of-type { border-radius: 3px 0 0 3px; }
+.segmented .btn:last-of-type { border-radius: 0 3px 3px 0; }
 select, input[type=number] { background: var(--panel); border: 1px solid var(--line);
   border-radius: 3px; padding: 5px 6px; }
 details > summary { cursor: pointer; color: var(--muted); }

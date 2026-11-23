@@ -19,6 +19,9 @@ def test_web_conf_defaults():
     assert (c.listen, c.port, c.tls) == ("0.0.0.0", 8600, True)
     assert c.self_signed and c.cert_path == "/var/lib/emuctl-web/web.crt"
     assert c.users_path == "/etc/emuctl/web-users"
+    assert c.history_path == "/var/lib/emuctl-web/history.json"
+    assert conf.parse_web_conf("history_file = off\n").history_path is None
+    assert conf.parse_web_conf("history_file = /h.json\n").history_path == "/h.json"
 
 
 def test_web_conf_values():

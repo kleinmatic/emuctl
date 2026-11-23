@@ -398,6 +398,8 @@ async def test_usage_series(client):
     body = await r.json()
     assert body["interval"] == 5 and len(body["t"]) == len(body["cpu_pct"]) >= 1
     assert (await client.get("/api/guests/g1/usage?window=1y", headers=h)).status == 400
+    day = await (await client.get("/api/guests/g1/usage?window=24h", headers=h)).json()
+    assert day["interval"] == 60
 
 
 async def test_events_stream_and_logout_closes_it(client):

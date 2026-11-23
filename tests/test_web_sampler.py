@@ -215,3 +215,40 @@ def test_supervisor_log_failure():
         raise subprocess.TimeoutExpired(argv, 15)
     s = types.SimpleNamespace(service="systemd", unit="u@{name}", elevate="none")
     assert "could not read" in data.supervisor_log(s, "g1", 10, run=boom)
+
+
+def test_a_day_of_one_minute_points_saved_and_read_back(settings, tmp_path, monkeypatch):
+    add_guest(settings, tmp_path, "g1")
+    cg = running(settings, "g1", monkeypatch, tmp_path / "cg")
+    clock = Clock()
+    clock.t = 600.0                              # the start of a minute
+    path = str(tmp_path / "history.json")
+    s = Sampler(settings, clock=clock, wall=clock, root=str(tmp_path / "cg"), history_file=path)
+    usec = 5000000
+    for _ in range(13):                          # 0, 5, ... 60 s: one whole minute, then one more
+        (cg / "cpu.stat").write_text(f"usage_usec {usec}\n")
+        s.tick()
+        clock.t += 5
+        usec += 1000000                          # 1 s of CPU every 5 s: 20 %
+    day = s.series("g1", seconds=sampler.DAY)
+    assert day["interval"] == 60 and day["t"] == [600] and day["cpu_pct"] == [20.0]
+
+    s.save()
+    again = Sampler(settings, clock=clock, wall=clock, history_file=path)
+    again.load()
+    assert again.series("g1", seconds=sampler.DAY)["cpu_pct"] == [20.0]
+    clock.t += sampler.DAY                       # a day later the point has aged out
+    old = Sampler(settings, clock=clock, wall=clock, history_file=path)
+    old.load()
+    assert old.series("g1", seconds=sampler.DAY)["t"] == []
+
+
+def test_a_damaged_history_file_is_ignored(settings, tmp_path):
+    add_guest(settings, tmp_path, "g1")
+    path = tmp_path / "history.json"
+    for text in ("not json", '{"version": 1, "guests": {"g1": [{"t": "x"}]}}',
+                 '{"version": 1, "guests": []}', '[]'):
+        path.write_text(text)
+        s = Sampler(settings, history_file=str(path))
+        s.load()
+        assert s.day == {}, text

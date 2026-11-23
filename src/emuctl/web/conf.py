@@ -16,7 +16,7 @@ STATE_DIR = "/var/lib/emuctl-web"
 # Root's, readable by the daemon's group: the daemon cannot add users to it.
 USERS_FILE = os.path.join(ETC, "web-users")
 KEYS = ("listen", "port", "tls", "tls_cert", "tls_key", "state_dir", "users_file", "task_log",
-        "server_names")
+        "server_names", "history_file")
 
 
 class WebConfError(Exception):
@@ -34,6 +34,7 @@ class WebConf:
     users_file: str = USERS_FILE
     task_log: str = "/var/log/emuctl/web-tasks.log"
     server_names: tuple = ()    # host names the page may be reached by, beyond the host's own
+    history_file: str = ""      # empty: history.json in state_dir; "off": not saved
 
     @property
     def self_signed(self):
@@ -46,6 +47,12 @@ class WebConf:
     @property
     def key_path(self):
         return self.tls_key or os.path.join(self.state_dir, "web.key")
+
+    @property
+    def history_path(self):
+        if self.history_file == "off":
+            return None
+        return self.history_file or os.path.join(self.state_dir, "history.json")
 
     @property
     def users_path(self):
@@ -80,7 +87,9 @@ def parse_web_conf(text, where="web.conf"):
                 if not re.fullmatch(r"[a-z0-9.-]+", n):
                     raise WebConfError(f"{where}: server_names: not a host name: {n!r}")
             out[k] = names
-        elif k in ("tls_cert", "tls_key", "state_dir", "users_file", "task_log"):
+        elif k == "history_file" and v == "off":
+            out[k] = v
+        elif k in ("tls_cert", "tls_key", "state_dir", "users_file", "task_log", "history_file"):
             if v and not os.path.isabs(v):
                 raise WebConfError(f"{where}: {k} must be an absolute path")
             out[k] = v

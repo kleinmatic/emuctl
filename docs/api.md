@@ -89,9 +89,10 @@ One row plus what the page needs from the conf:
 `emuctl start` would give it. A guest whose conf does not parse has
 `state: "error"` and `conf_error`.
 
-### `GET /api/guests/{guest}/usage?window=1h` (viewer)
+### `GET /api/guests/{guest}/usage?window=1h|24h` (viewer)
 
-The last hour, one point every 5 seconds, as columns:
+`window=1h` (the default): the last hour, one point every 5 seconds, as
+columns:
 
 ```json
 {"interval": 5, "t": [1795365600, 1795365605],
@@ -100,8 +101,11 @@ The last hour, one point every 5 seconds, as columns:
  "nics": {"tap1": {"rx": [null, 1200.5], "tx": [null, 310.0]}}}
 ```
 Rates are per second. `null` means no reading: the guest was down, had just
-started, or a counter went backwards because it restarted. `window` accepts
-only `1h` for now.
+started, or a counter went backwards because it restarted.
+
+`window=24h`: the last day, one point a minute (`"interval": 60`), each the
+average of that minute's samples (memory: the largest). The day survives a
+restart of the daemon; see `history_file` in [web.md](web.md#settings-etcemuctlwebconf).
 
 ### `GET /api/guests/{guest}/network` (viewer)
 

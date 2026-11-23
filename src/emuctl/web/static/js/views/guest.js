@@ -45,6 +45,16 @@ export function guestView(name, tab, store) {
   let detail = null;
   let closed = false;
   let logState = { source: "console", lines: 200 };
+  let span = "1h";        // the graphs: the last hour or the last day
+  let dayCache = null;    // the day changes once a minute: {at, data}
+  function usage(fetch) {
+    if (span === "1h") return fetch(guestPath(name, "/usage?window=1h"));
+    if (dayCache && Date.now() - dayCache.at < 60000) return Promise.resolve(dayCache.data);
+    return fetch(guestPath(name, "/usage?window=24h")).then((data) => {
+      dayCache = { at: Date.now(), data };
+      return data;
+    });
+  }
 
   function renderHead() {
     const row = store.row(name) || detail || { name, state: "error", detail: "no such guest" };
@@ -73,7 +83,7 @@ export function guestView(name, tab, store) {
         get(guestPath(name, "/check")).catch(() => null)]);
     }
     const [[net, hw, chk], d, u, logs] = await Promise.all([once,
-      fetch(guestPath(name)), fetch(guestPath(name, "/usage")),
+      fetch(guestPath(name)), usage(fetch),
       fetch(guestPath(name, "/log?source=console&lines=12")).catch(() => null)]);
     detail = d;
     renderHead();
@@ -99,12 +109,13 @@ export function guestView(name, tab, store) {
         chk.errors.length ? h("ul", { class: "warnings errors" }, chk.errors.map((w) => h("li", {}, h("span", { text: w })))) : null,
         chk.warnings.length ? warningList(chk.warnings) : null));
     }
-    cards.push(chart({ title: "CPU", t: u.t, series: [{ label: "CPU", values: u.cpu_pct }],
+    const spanText = span === "1h" ? "the last hour" : "the last day";
+    cards.push(chart({ title: "CPU", t: u.t, span: spanText, step: u.interval, series: [{ label: "CPU", values: u.cpu_pct }],
       fmt: (v) => `${Math.round(v)}%`, big: up ? pct(last(u.cpu_pct)) : DASH, note: "of one CPU", floor: 10 }));
-    cards.push(chart({ title: "Memory", t: u.t, series: [{ label: "Memory", values: u.mem_bytes }],
+    cards.push(chart({ title: "Memory", t: u.t, span: spanText, step: u.interval, series: [{ label: "Memory", values: u.mem_bytes }],
       fmt: bytes, big: up ? bytes(d.mem_bytes) : DASH,
       note: d.mem_peak_bytes ? `peak ${bytes(d.mem_peak_bytes)}` : "", floor: 1024 * 1024 }));
-    cards.push(chart({ title: "Disk I/O", t: u.t, series: [{ label: "read", values: u.io_read }, { label: "write", values: u.io_write }],
+    cards.push(chart({ title: "Disk I/O", t: u.t, span: spanText, step: u.interval, series: [{ label: "read", values: u.io_read }, { label: "write", values: u.io_write }],
       fmt: rate, big: up ? `${rate(last(u.io_read))} · ${rate(last(u.io_write))}` : DASH, floor: 1024 }));
     const ifnames = Object.keys(u.nics);
     if (ifnames.length) {
@@ -114,7 +125,7 @@ export function guestView(name, tab, store) {
         return s;
       });
       const rx = sum("rx"), tx = sum("tx");
-      cards.push(chart({ title: "Network", t: u.t, series: [{ label: "in", values: rx }, { label: "out", values: tx }],
+      cards.push(chart({ title: "Network", t: u.t, span: spanText, step: u.interval, series: [{ label: "in", values: rx }, { label: "out", values: tx }],
         fmt: rate, big: `↓ ${rate(last(rx))} ↑ ${rate(last(tx))}`, floor: 1024 }));
     }
     if (net && net.nics.length) {
@@ -140,7 +151,11 @@ export function guestView(name, tab, store) {
       cards.push(h("section", { class: "card" }, h("h2", { text: "Last console lines" }),
         h("pre", { class: "text", text: logs.text || "(empty)" })));
     }
-    return [h("div", { class: "grid" }, cards)];
+    const pick = (value, label) => h("button", { class: "btn", type: "button", text: label,
+      "aria-pressed": String(span === value), onclick: () => { span = value; render(true); } });
+    return [h("div", { class: "toolbar segmented", role: "group", "aria-label": "Graphs cover" },
+      h("span", { class: "muted", text: "Graphs:" }), pick("1h", "Last hour"), pick("24h", "Last day")),
+    h("div", { class: "grid" }, cards)];
   }
 
   async function network() {

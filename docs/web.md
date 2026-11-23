@@ -77,7 +77,12 @@ state_dir = /var/lib/emuctl-web
 users_file = /etc/emuctl/web-users
 task_log = /var/log/emuctl/web-tasks.log
 server_names =          # other names the page is reached by, comma-separated
+history_file =          # empty: history.json in state_dir; off: not saved
 ```
+
+`history_file` holds the last day of the graphs, one point a minute per
+guest. The daemon writes it every five minutes and when it stops, and reads
+it when it starts, so a restart costs at most five minutes of the day.
 
 ### Host names
 
