@@ -69,6 +69,7 @@ async def test_everything_but_the_login_page_needs_a_session(client):
     assert r.status == 302 and r.headers["Location"] == "/login"
     for path in ("/api/host", "/api/host/network", "/api/guests/g1", "/api/guests/g1/log",
                  "/api/guests/g1/hardware", "/api/guests/g1/network", "/api/guests/g1/usage",
+                 "/api/guests/g1/check",
                  "/api/events", "/api/session"):
         assert (await client.get(path)).status == 401, path
     assert (await client.get("/login")).status == 200
@@ -319,6 +320,40 @@ async def test_hardware(client, settings, tmp_path):
     hw = await (await client.get("/api/guests/g1/hardware", headers=h)).json()
     assert hw["memory"] == "64 MB"
     assert hw["raw"][0]["text"] == "set cpu 64m\n"
+
+
+async def test_check(client, settings):
+    with open(settings.conf_path("g1"), "a") as fh:
+        fh.write("locked = being copied\nnotes = gone.txt\n")
+    h = await session(client)
+    r = await (await client.get("/api/guests/g1/check", headers=h)).json()
+    assert r["errors"] == []
+    assert any("locked: being copied" in w for w in r["warnings"])
+    assert any("gone.txt does not exist" in w for w in r["warnings"])
+
+
+async def test_notes(client, settings, tmp_path):
+    h = await session(client)
+    assert (await client.get("/api/guests/g1/notes", headers=h)).status == 404
+    with open(settings.conf_path("g1"), "a") as fh:
+        fh.write("notes = NOTES.txt\n")
+    (tmp_path / "g1" / "NOTES.txt").write_text("root password is on the sticky note\n")
+    r = await (await client.get("/api/guests/g1/notes", headers=h)).json()
+    assert r["text"].startswith("root password") and r["truncated"] is False
+    (tmp_path / "g1" / "NOTES.txt").write_bytes(b"x" * (data.NOTES_MAX + 5))
+    r = await (await client.get("/api/guests/g1/notes", headers=h)).json()
+    assert len(r["text"]) == data.NOTES_MAX and r["truncated"] is True
+
+
+async def test_notes_never_show_a_protected_file(client, settings, tmp_path, monkeypatch):
+    secret = tmp_path / "env"
+    secret.mkdir()
+    (secret / "g1").write_text("PASSWORD=x\n")
+    monkeypatch.setattr(data, "PROTECTED", [str(secret)])
+    with open(settings.conf_path("g1"), "a") as fh:
+        fh.write(f"notes = {secret / 'g1'}\n")
+    h = await session(client)
+    assert (await client.get("/api/guests/g1/notes", headers=h)).status == 404
 
 
 async def test_logs(client, settings, tmp_path, monkeypatch):

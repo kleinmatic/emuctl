@@ -442,6 +442,32 @@ async def guest_network(request):
     return web.json_response(await cached(request.app, ("guest", name), build))
 
 
+@routes.get("/api/guests/{g}/check")
+@needs("viewer")
+async def guest_check(request):
+    """What `emuctl check <guest>` reports, as the daemon's account sees it."""
+    from .. import network
+    from ..checks import check_guest
+    s, name = request.app[SETTINGS], request["guest"]
+    errors, warnings = await asyncio.to_thread(check_guest, s, name)
+    try:
+        net = await cached(request.app, "host", lambda: network.host_network(s))
+        warnings += [w for w in net["warnings"] if w.startswith(f"{name}: ")]
+    except Exception as exc:
+        warnings.append(f"network check failed: {exc}")
+    return web.json_response({"errors": errors, "warnings": warnings})
+
+
+@routes.get("/api/guests/{g}/notes")
+@needs("viewer")
+async def guest_notes(request):
+    cfg = guest_config(request)
+    notes = await asyncio.to_thread(data.read_notes, cfg)
+    if notes is None:
+        raise json_error(web.HTTPNotFound, "this guest has no notes file the daemon can read")
+    return web.json_response({"path": cfg.notes, **notes})
+
+
 @routes.get("/api/guests/{g}/hardware")
 @needs("viewer")
 async def guest_hardware(request):

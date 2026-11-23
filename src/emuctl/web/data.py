@@ -243,6 +243,27 @@ def tail_bytes(path, limit=LOG_TAIL_BYTES, within=None):
         os.close(fd)
 
 
+NOTES_MAX = 256 * 1024
+
+
+def read_notes(cfg):
+    """{"text", "truncated"} from the guest's notes file, or None if there is none to show."""
+    if not cfg.notes or not safe_path(cfg.notes):
+        return None
+    try:
+        fd = os.open(cfg.notes, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        data = os.read(fd, NOTES_MAX + 1)
+    finally:
+        os.close(fd)
+    return {"text": data[:NOTES_MAX].decode("utf-8", "replace"),
+            "truncated": len(data) > NOTES_MAX}
+
+
 def console_log_path(cfg):
     return os.path.join(cfg.workdir, "console.log")
 

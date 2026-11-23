@@ -109,12 +109,15 @@ main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; }
 .scroll { overflow-x: auto; }
 pre.text { margin: 0; font-family: var(--mono); font-size: 12px; line-height: 1.5;
   white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); }
+pre.notes { margin: 0; font-family: var(--mono); font-size: 13px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100ch; }
 pre.log { margin: 0; font-family: var(--mono); font-size: 12px; line-height: 1.45;
   background: var(--term-bg); color: var(--term-fg); padding: 12px 14px; border-radius: 4px;
   overflow: auto; max-height: 70vh; white-space: pre-wrap; overflow-wrap: anywhere; }
 ul.warnings { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px;
   color: var(--warn); }
 ul.warnings li span { color: var(--text); }
+ul.warnings.errors { color: var(--bad); margin-bottom: 8px; }
 .empty { color: var(--muted); padding: 12px; }
 .error-banner { background: var(--note); border: 1px solid var(--line); border-radius: 4px;
   padding: 8px 12px; }
@@ -211,7 +214,9 @@ dialog.dialog.wide { max-width: min(860px, calc(100vw - 32px)); width: 100%; }
 dialog.dialog::backdrop { background: #0006; }
 dialog.dialog h2 { margin: 0 0 10px; font-size: 15px; }
 dialog.dialog p { margin: 0 0 8px; }
-dialog.dialog pre.log { margin-top: 12px; max-height: 50vh; }
+dialog.dialog pre.notes { margin: 0; font-family: var(--mono); font-size: 13px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100ch; }
+pre.log { margin-top: 12px; max-height: 50vh; }
 dialog.dialog .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 
 /* tasks */

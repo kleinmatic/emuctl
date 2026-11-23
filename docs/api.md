@@ -109,6 +109,19 @@ The same as `emuctl net <guest> --json`: each host interface with its
 bridge, link state, MAC and whether the bridge has seen it, traffic counters,
 and warnings.
 
+### `GET /api/guests/{guest}/check` (viewer)
+
+What `emuctl check <guest>` reports, run as the daemon's own account:
+`{"errors": [...], "warnings": [...]}`, with the host network warnings that
+name this guest added. A file the daemon may not read can show up as
+missing.
+
+### `GET /api/guests/{guest}/notes` (viewer)
+
+The guest's `notes` file: `{"path", "text", "truncated"}`, at most the
+first 256 KB. 404 if the conf names none, or the daemon cannot read it.
+Files under `/etc/emuctl/env/` are never shown.
+
 ### `GET /api/guests/{guest}/hardware` (viewer)
 
 The same as `emuctl info <guest> --hardware --json`, plus `raw`: each config

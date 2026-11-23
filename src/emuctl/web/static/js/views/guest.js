@@ -10,7 +10,7 @@ import { displayView } from "./display.js";
 import { stateBadge, warningList } from "./host.js";
 
 const TABS = [["summary", "Summary"], ["console", "Console"], ["display", "Display"],
-  ["network", "Network"], ["hardware", "Hardware"], ["logs", "Logs"]];
+  ["network", "Network"], ["hardware", "Hardware"], ["logs", "Logs"], ["notes", "Notes"]];
 
 function nicLine(n) {
   if (!n.exists) return `${n.host_if} · does not exist`;
@@ -54,6 +54,8 @@ export function guestView(name, tab, store) {
     // The Display tab only for a guest whose conf names a display.
     const shown = tabs.find((t) => t.dataset.tab === "display");
     if (detail) shown.classList.toggle("hidden", !detail.display);
+    const notesTab = tabs.find((t) => t.dataset.tab === "notes");
+    if (detail) notesTab.classList.toggle("hidden", !detail.notes);
   }
 
   async function refreshDetail() {
@@ -67,9 +69,10 @@ export function guestView(name, tab, store) {
     const fetch = refresh ? poll : get;
     if (!once) {
       once = Promise.all([get(guestPath(name, "/network")).catch(() => null),
-        get(guestPath(name, "/hardware")).catch(() => null)]);
+        get(guestPath(name, "/hardware")).catch(() => null),
+        get(guestPath(name, "/check")).catch(() => null)]);
     }
-    const [[net, hw], d, u, logs] = await Promise.all([once,
+    const [[net, hw, chk], d, u, logs] = await Promise.all([once,
       fetch(guestPath(name)), fetch(guestPath(name, "/usage")),
       fetch(guestPath(name, "/log?source=console&lines=12")).catch(() => null)]);
     detail = d;
@@ -90,6 +93,12 @@ export function guestView(name, tab, store) {
       ["Can start", up ? null : (d.can_start ? "yes" : d.start_refused)],
     ]));
     const cards = [status];
+    if (chk && (chk.errors.length || chk.warnings.length)) {
+      cards.push(h("section", { class: "card" },
+        h("h2", {}, "Checks ", h("span", { class: "muted", text: "emuctl check, as the web daemon sees it" })),
+        chk.errors.length ? h("ul", { class: "warnings errors" }, chk.errors.map((w) => h("li", {}, h("span", { text: w })))) : null,
+        chk.warnings.length ? warningList(chk.warnings) : null));
+    }
     cards.push(chart({ title: "CPU", t: u.t, series: [{ label: "CPU", values: u.cpu_pct }],
       fmt: (v) => `${Math.round(v)}%`, big: up ? pct(last(u.cpu_pct)) : DASH, note: "of one CPU", floor: 10 }));
     cards.push(chart({ title: "Memory", t: u.t, series: [{ label: "Memory", values: u.mem_bytes }],
@@ -209,6 +218,19 @@ export function guestView(name, tab, store) {
     return [h("div", { class: "toolbar" }, source, lines, h("button", { class: "btn", type: "button", onclick: load, text: "Refresh" })), pre];
   }
 
+  async function notes() {
+    try {
+      const n = await get(guestPath(name, "/notes"));
+      return [h("section", { class: "card" }, h("h2", {}, "Notes ", h("span", { class: "muted mono", text: n.path })),
+        h("pre", { class: "notes", text: n.text || "(empty)" }),
+        n.truncated ? h("div", { class: "muted", text: "Only the first 256 KB is shown." }) : null)];
+    } catch (e) {
+      return [h("div", { class: "card muted", text: e.status === 404
+        ? "No notes. Set notes = <file> in the guest's conf; the web daemon's account must be able to read it."
+        : e.message })];
+    }
+  }
+
   let term = null;
   async function console_() {
     if (!term) term = consoleView(name, store);
@@ -221,7 +243,7 @@ export function guestView(name, tab, store) {
     return [screen.el];
   }
 
-  const loaders = { summary, console: console_, display, network, hardware, logs };
+  const loaders = { summary, console: console_, display, network, hardware, logs, notes };
   let busy = false;
   async function render(refresh = false) {
     if (busy) return;
