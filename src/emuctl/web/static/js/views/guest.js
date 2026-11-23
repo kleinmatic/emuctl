@@ -6,10 +6,11 @@ import { clear, h, kv } from "../dom.js";
 import { DASH, bytes, isUp, last, longUptime, pct, rate } from "../format.js";
 import { actionButtons } from "./actions.js";
 import { consoleView } from "./console.js";
+import { displayView } from "./display.js";
 import { stateBadge, warningList } from "./host.js";
 
-const TABS = [["summary", "Summary"], ["console", "Console"], ["network", "Network"],
-  ["hardware", "Hardware"], ["logs", "Logs"]];
+const TABS = [["summary", "Summary"], ["console", "Console"], ["display", "Display"],
+  ["network", "Network"], ["hardware", "Hardware"], ["logs", "Logs"]];
 
 function nicLine(n) {
   if (!n.exists) return `${n.host_if} · does not exist`;
@@ -37,11 +38,10 @@ export function guestView(name, tab, store) {
   if (!TABS.some(([id]) => id === tab)) tab = "summary";
   const head = h("div", { class: "titlebar" });
   const body = h("div", { class: "content" });
-  const el = h("div", {}, head,
-    h("div", { class: "tabs", role: "tablist" }, TABS.map(([id, label]) =>
-      h("a", { class: "tab", role: "tab", href: `#/g/${encodeURIComponent(name)}/${id}`,
-        "aria-selected": String(tab === id), text: label }))),
-    body);
+  const tabs = TABS.map(([id, label]) =>
+    h("a", { class: "tab", role: "tab", href: `#/g/${encodeURIComponent(name)}/${id}`,
+      "aria-selected": String(tab === id), text: label, dataset: { tab: id } }));
+  const el = h("div", {}, head, h("div", { class: "tabs", role: "tablist" }, tabs), body);
   let detail = null;
   let closed = false;
   let logState = { source: "console", lines: 200 };
@@ -51,6 +51,9 @@ export function guestView(name, tab, store) {
     const sub = [row.os, row.emulator, row.node && row.node !== name ? `node ${row.node}` : null].filter(Boolean).join(" · ");
     clear(head).append(h("h1", { text: name }), stateBadge(row), h("span", { class: "muted", text: sub }),
       h("div", { class: "actions" }, actionButtons(name, detail, refreshDetail)));
+    // The Display tab only for a guest whose conf names a display.
+    const shown = tabs.find((t) => t.dataset.tab === "display");
+    if (detail) shown.classList.toggle("hidden", !detail.display);
   }
 
   async function refreshDetail() {
@@ -211,7 +214,13 @@ export function guestView(name, tab, store) {
     return [term.el];
   }
 
-  const loaders = { summary, console: console_, network, hardware, logs };
+  let screen = null;
+  async function display() {
+    if (!screen) screen = displayView(name, store);
+    return [screen.el];
+  }
+
+  const loaders = { summary, console: console_, display, network, hardware, logs };
   let busy = false;
   async function render(refresh = false) {
     if (busy) return;
@@ -229,5 +238,5 @@ export function guestView(name, tab, store) {
   renderHead();
   if (tab !== "summary") refreshDetail();
   render();
-  return { el, close() { closed = true; store.listeners.delete(onRows); if (term) term.close(); } };
+  return { el, close() { closed = true; store.listeners.delete(onRows); if (term) term.close(); if (screen) screen.close(); } };
 }

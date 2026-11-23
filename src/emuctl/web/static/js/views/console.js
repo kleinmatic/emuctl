@@ -6,6 +6,7 @@ import { Terminal } from "../../vendor/xterm/xterm.mjs";
 import { get, guestPath } from "../api.js";
 import { h } from "../dom.js";
 import { slowSend } from "../keys.js";
+import { overlay } from "./display.js";
 
 const KEYS = [["Ctrl-P", "\x10"], ["Ctrl-E", "\x05"], ["Ctrl-C", "\x03"], ["Ctrl-]", "\x1d"]];
 
@@ -17,6 +18,14 @@ export function consoleView(name, store) {
   const fit = new FitAddon();
   term.loadAddon(fit);
   const screen = h("div", { class: "terminal", "aria-label": `Console of ${name}` });
+  const frame = h("div", { class: "terminal-frame" }, screen);
+  let veil = null;
+  function cover(text) {
+    if (veil) veil.remove();
+    veil = overlay(text);
+    frame.append(veil);
+  }
+  function uncover() { if (veil) { veil.remove(); veil = null; } }
   const bannerText = h("span");
   const takeBtn = h("button", { class: "btn warn", type: "button", text: "Take keyboard" });
   const banner = h("div", { class: "console-banner" }, bannerText, takeBtn);
@@ -30,7 +39,7 @@ export function consoleView(name, store) {
     h("div", { class: "toolbar" }, h("span", { class: "muted", text: "Send:" }), keyBtns, pasteBtn,
       h("span", { class: "spacer" }), reconnectBtn,
       h("button", { class: "btn", type: "button", text: "Download log", onclick: download })),
-    screen);
+    frame);
 
   let ws = null;
   let typing = false;
@@ -58,12 +67,14 @@ export function consoleView(name, store) {
     const others = s.viewers > 1 ? ` · ${s.viewers - 1} other viewer${s.viewers > 2 ? "s" : ""}` : "";
     if (!s.running) {
       bannerText.textContent = s.message || `${name} is not running.`;
+      cover(`${name} is not running. This is the end of its last session.`);
       takeBtn.classList.add("hidden");
       reconnectBtn.classList.remove("hidden");
       return;
     }
     takeBtn.classList.remove("hidden");
     reconnectBtn.classList.add("hidden");
+    uncover();
     if (typing) {
       bannerText.textContent = `Typing. Your keys go to ${name}${others}.`;
       takeBtn.textContent = "Release keyboard";
@@ -106,7 +117,10 @@ export function consoleView(name, store) {
       typing = false;
       term.options.disableStdin = true;
       for (const b of [...keyBtns, pasteBtn]) b.disabled = true;
-      if (!bannerText.textContent.includes("not running")) bannerText.textContent = "Disconnected.";
+      if (!bannerText.textContent.includes("not running")) {
+        bannerText.textContent = "Disconnected.";
+        cover("Disconnected. Press Reconnect.");
+      }
       takeBtn.classList.add("hidden");
       reconnectBtn.classList.remove("hidden");
     };

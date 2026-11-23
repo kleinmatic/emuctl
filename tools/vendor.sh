@@ -31,7 +31,7 @@ fetch() {   # name version sha256
 }
 
 rm -rf "$out"
-mkdir -p "$out/fonts" "$out/xterm"
+mkdir -p "$out/fonts" "$out/xterm" "$out/novnc"
 
 fetch @fontsource/ibm-plex-sans 5.3.0 232592af20ae413026cc705fc9c104135fb760432fd710f06a02c39e062d3213
 for w in 400 500 600; do cp "$tmp/package/files/ibm-plex-sans-latin-$w-normal.woff2" "$out/fonts/"; done
@@ -48,6 +48,11 @@ fetch @xterm/addon-fit 0.11.0 26003b4517a132b64e4ff228fd88a5fda3fff5e606c76093f6
 cp "$tmp/package/lib/addon-fit.mjs" "$out/xterm/"
 cp "$tmp/package/LICENSE" "$out/xterm/LICENSE-addon-fit.txt"
 
+fetch @novnc/novnc 1.7.0 32689f18d6abe96bc6530828a6bd0b9ae33bda07c083a6575ed255b5a8f2e903
+cp -R "$tmp/package/core" "$tmp/package/vendor" "$out/novnc/"
+cp "$tmp/package/LICENSE.txt" "$out/novnc/LICENSE-novnc.txt"
+find "$out/novnc" -name '*.md' -delete
+
 cat > "$out/README.md" <<'EOF'
 # Third-party files
 
@@ -58,5 +63,6 @@ Copied by `tools/vendor.sh`; do not edit. Each keeps its own licence.
 | `fonts/ibm-plex-*.woff2` | IBM Plex Sans and Mono, via @fontsource 5.3.0 | SIL Open Font License 1.1 (`fonts/LICENSE-ibm-plex.txt`) |
 | `xterm/xterm.mjs`, `xterm/xterm.css` | @xterm/xterm 6.0.0 | MIT (`xterm/LICENSE-xterm.txt`) |
 | `xterm/addon-fit.mjs` | @xterm/addon-fit 0.11.0 | MIT (`xterm/LICENSE-addon-fit.txt`) |
+| `novnc/core/`, `novnc/vendor/pako/` | @novnc/novnc 1.7.0 | MPL 2.0, with pako under MIT (`novnc/LICENSE-novnc.txt` lists both) |
 EOF
 echo "vendored into $out"
