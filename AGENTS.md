@@ -140,7 +140,8 @@ explains them to users.
    the session cookie loses `Secure` and the daemon logs a warning.
 2. Every request except the login page needs a session: a random 256-bit
    token in a cookie marked `HttpOnly`, `Secure` and `SameSite=Strict`, kept
-   in memory, expiring after 12 hours idle (timed refreshes, sent with
+   by the SHA-256 of the cookie only (in memory and in the state directory's
+   `sessions.json`, so they survive a restart), expiring after 12 hours idle (timed refreshes, sent with
    `X-Emuctl-Background: 1`, do not count) and 24 hours after login. The one
    other way in is an API token (`Authorization: Bearer`, `web/tokens.py`):
    GET requests only, never a WebSocket, and only on routes marked

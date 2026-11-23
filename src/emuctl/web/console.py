@@ -107,7 +107,7 @@ async def _watch(ws, sessions, token, consoles, every=30):
     """End a console whose session has expired, even if nobody types."""
     while not ws.closed:
         await asyncio.sleep(every)
-        if sessions.get(token, touch=False) is None:
+        if sessions.get_id(token, touch=False) is None:
             consoles.kick(ws)
             return
 
@@ -204,12 +204,12 @@ async def _from_browser(ws, writer, room, consoles, guest, user, token, sessions
     tokens, refilled = float(TAKE_BURST), 0.0
     loop = asyncio.get_running_loop()
     async for msg in ws:
-        if sessions.get(token, touch=False) is None:
+        if sessions.get_id(token, touch=False) is None:
             break                               # logged out or expired
         if msg.type == WSMsgType.BINARY:
             if room.typist is not ws:
                 continue                        # viewing: keys are dropped
-            sessions.get(token)                 # typing counts as activity
+            sessions.get_id(token)               # typing counts as activity
             writer.write(escape_iac(msg.data))
             await writer.drain()
         elif msg.type == WSMsgType.TEXT:

@@ -364,7 +364,7 @@ async def test_an_expired_session_ends_an_idle_console():
     ws = FakeWS()
     transport = FakeTransport()
     consoles.handlers[ws] = (None, "g1", transport)
-    sessions = type("S", (), {"get": lambda self, t, touch=False: None})()
+    sessions = type("S", (), {"get_id": lambda self, t, touch=False: None})()
     await asyncio.wait_for(console._watch(ws, sessions, "tok", consoles, every=0.01), 2)
     assert transport.aborted
 

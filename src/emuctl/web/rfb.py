@@ -221,7 +221,7 @@ async def _pipe(ws, reader, writer, sessions, token):
     async def watch():
         while not ws.closed:
             await asyncio.sleep(SESSION_CHECK)
-            if sessions.get(token, touch=False) is None:
+            if sessions.get_id(token, touch=False) is None:
                 await ws.close(code=4000, message=b"session ended")
                 return
 
@@ -233,7 +233,7 @@ async def _pipe(ws, reader, writer, sessions, token):
                 # Keys and the mouse count as activity; noVNC's own update
                 # requests do not, or an open screen would keep a session alive.
                 touch = bool(msg.data) and msg.data[0] in USER_INPUT
-                if sessions.get(token, touch=touch) is None:
+                if sessions.get_id(token, touch=touch) is None:
                     break
                 writer.write(msg.data)
                 await writer.drain()

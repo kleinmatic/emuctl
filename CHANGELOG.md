@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Logins survive a restart of the web daemon. Sessions are kept in
+  `sessions.json` in its state directory, by the SHA-256 of each cookie only.
+
 - `locked = <reason>` in a guest's conf refuses every start, from
   `emuctl start`, the web page or the service manager, with that reason.
   `emuctl check`, `emuctl info` and the web page show it.

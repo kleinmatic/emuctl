@@ -168,16 +168,17 @@ def test_sessions_expire_when_idle_and_when_user_goes():
     s = auth.Sessions(users, idle=100, clock=clock)
     s.on_end.append(ended.append)
     a = s.new("alice")
-    assert len(a.token) >= 43 and a.csrf != a.token
+    assert len(a.cookie) >= 43 and a.csrf != a.cookie and a.cookie not in a.token
+    assert s.get(a.token) is None               # the id is not a cookie
     clock.t += 90
-    assert s.get(a.token) is a                  # touched: idle restarts
+    assert s.get(a.cookie) is a                 # touched: idle restarts
     clock.t += 90
-    assert s.get(a.token, touch=False) is a
+    assert s.get(a.cookie, touch=False) is a
     clock.t += 20
-    assert s.get(a.token) is None and ended == [a.token]
+    assert s.get(a.cookie) is None and ended == [a.token]
     b = s.new("alice")
     del present["alice"]
-    assert s.get(b.token) is None               # user removed: session gone
+    assert s.get(b.cookie) is None              # user removed: session gone
     assert s.get(None) is None and s.get("made-up") is None
 
 
@@ -311,9 +312,9 @@ def test_a_new_password_ends_sessions(tmp_path, monkeypatch):
     users = auth.Users(p)
     sessions = auth.Sessions(users)
     s = sessions.new("alice")
-    assert sessions.get(s.token) is s
+    assert sessions.get(s.cookie) is s
     auth.set_password(p, "alice", "another password")
-    assert sessions.get(s.token) is None
+    assert sessions.get(s.cookie) is None
 
 
 def test_passwd_will_not_overwrite_an_unreadable_file(tmp_path):
@@ -321,3 +322,31 @@ def test_passwd_will_not_overwrite_an_unreadable_file(tmp_path):
     os.symlink(tmp_path / "elsewhere", p)
     with pytest.raises(auth.AuthError, match="not changing it"):
         auth.set_password(str(p), "alice", "a long password")
+
+
+def test_sessions_survive_a_restart_but_not_their_limits(tmp_path):
+    clock = Clock()
+    present = {"alice": types.SimpleNamespace(hash="h1")}
+    users = types.SimpleNamespace(get=present.get)
+    path = str(tmp_path / "sessions.json")
+    s = auth.Sessions(users, idle=100, clock=clock, path=path)
+    a = s.new("alice")
+    text = (tmp_path / "sessions.json").read_text()
+    assert a.cookie not in text and "h1" not in text            # digests only
+    assert oct(os.stat(path).st_mode & 0o777) == "0o600"
+    again = auth.Sessions(users, idle=100, clock=clock, path=path)
+    again.load()
+    got = again.get(a.cookie)
+    assert got is not None and got.csrf == a.csrf
+    clock.t += 101                                              # idle too long meanwhile
+    later = auth.Sessions(users, idle=100, clock=clock, path=path)
+    later.load()
+    assert later.get(a.cookie) is None
+    s.end(a.token)                                              # logout is saved too
+    gone = auth.Sessions(users, idle=100, clock=Clock(), path=path)
+    gone.load()
+    assert gone._by_token == {}
+    (tmp_path / "sessions.json").write_text('{"version": 1, "sessions": {"x": 1}}')
+    bad = auth.Sessions(users, path=path)
+    bad.load()
+    assert bad._by_token == {}

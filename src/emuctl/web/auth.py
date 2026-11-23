@@ -15,12 +15,14 @@ import grp
 import hashlib
 import hmac
 import ipaddress
+import json
 import logging
 import os
 import re
 import secrets
 import stat
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -248,59 +250,139 @@ IDLE = 12 * 3600
 MAX_AGE = 24 * 3600         # however busy, a session ends a day after logging in
 
 
+def _digest(text):
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
 @dataclass
 class Session:
-    token: str
+    token: str                  # the session's id: SHA-256 of its cookie, never the cookie
     user: str
     csrf: str
     created: float
     seen: float
-    hash: str = ""              # the password hash at login: a new password ends the session
+    hash: str = ""              # SHA-256 of the password hash at login: a new password ends it
+    cookie: str = field(default="", repr=False)   # only on a new session, to send once
+
+
+def _valid_session(sid, v):
+    return (isinstance(sid, str) and re.fullmatch(r"[0-9a-f]{64}", sid) is not None
+            and isinstance(v, dict) and isinstance(v.get("user"), str)
+            and isinstance(v.get("csrf"), str) and isinstance(v.get("hash"), str)
+            and all(isinstance(v.get(k), (int, float)) for k in ("created", "seen")))
 
 
 class Sessions:
-    """Sessions in memory. A restart of the daemon logs everyone out."""
+    """Sessions, kept across restarts of the daemon in `path` if given.
 
-    def __init__(self, users, idle=IDLE, max_age=MAX_AGE, clock=time.time):
+    The browser holds a random 256-bit cookie; the daemon knows a session only
+    by the cookie's SHA-256, in memory and in the file. So the file (0600, in
+    the daemon's own state directory) cannot be turned back into cookies, and
+    a copy of it logs nobody in."""
+
+    def __init__(self, users, idle=IDLE, max_age=MAX_AGE, clock=time.time, path=None):
         self.users, self.idle, self.max_age, self.clock = users, idle, max_age, clock
-        self._by_token = {}
-        self.on_end = []            # callbacks(token), for open streams
+        self.path = path
+        self._by_token = {}         # session id -> Session
+        self.on_end = []            # callbacks(session id), for open streams
+        self._save_lock = threading.Lock()
 
     def new(self, user):
         now = self.clock()
         u = self.users.get(user)
-        s = Session(secrets.token_urlsafe(32), user, secrets.token_urlsafe(32), now, now,
-                    getattr(u, "hash", ""))
+        cookie = secrets.token_urlsafe(32)
+        s = Session(_digest(cookie), user, secrets.token_urlsafe(32), now, now,
+                    _digest(getattr(u, "hash", "")), cookie)
         self._by_token[s.token] = s
         self._prune(now)
+        self.save()
         return s
 
-    def get(self, token, touch=True):
-        """The live session for `token`, or None. A session ends after IDLE
+    def get(self, cookie, touch=True):
+        """The live session for a browser's cookie, or None."""
+        if not isinstance(cookie, str) or len(cookie) > 200:
+            return None
+        return self.get_id(_digest(cookie), touch)
+
+    def get_id(self, sid, touch=True):
+        """The live session with this id, or None. A session ends after IDLE
         seconds without a request the user made (the page's own refreshes pass
-        touch=False), MAX_AGE seconds after login, or when its user is removed."""
-        s = self._by_token.get(token) if isinstance(token, str) else None
+        touch=False), MAX_AGE seconds after login, when its user is removed, or
+        when the user's password changes."""
+        s = self._by_token.get(sid) if isinstance(sid, str) else None
         if s is None:
             return None
         now = self.clock()
         u = self.users.get(s.user)
         if (now - s.seen > self.idle or now - s.created > self.max_age or u is None
-                or getattr(u, "hash", "") != s.hash):
-            self.end(token)
+                or not hmac.compare_digest(_digest(getattr(u, "hash", "")), s.hash)):
+            self.end(sid)
             return None
         if touch:
             s.seen = now
         return s
 
-    def end(self, token):
-        if self._by_token.pop(token, None) is not None:
+    def end(self, sid):
+        if self._by_token.pop(sid, None) is not None:
             for cb in list(self.on_end):
-                cb(token)
+                cb(sid)
+            self.save()
 
     def _prune(self, now):
-        for tok, s in list(self._by_token.items()):
+        for sid, s in list(self._by_token.items()):
             if now - s.seen > self.idle or now - s.created > self.max_age:
-                self.end(tok)
+                self.end(sid)
+
+    # --- across restarts ----------------------------------------------------------
+
+    def save(self):
+        """Write the sessions to `path`, replacing it whole. Called on login and
+        logout, and from time to time for the idle clocks."""
+        if not self.path:
+            return
+        body = json.dumps({"version": 1, "sessions": {
+            sid: {"user": s.user, "csrf": s.csrf, "created": s.created, "seen": s.seen,
+                  "hash": s.hash} for sid, s in list(self._by_token.items())}})
+        with self._save_lock:
+            tmp = None
+            try:
+                fd, tmp = tempfile.mkstemp(dir=os.path.dirname(self.path) or ".",
+                                           prefix=".sessions.")
+                with os.fdopen(fd, "w") as fh:
+                    fh.write(body)
+                os.replace(tmp, self.path)
+                tmp = None
+            except OSError as exc:
+                log.warning("could not save the sessions to %s: %s", self.path, exc)
+            finally:
+                if tmp:
+                    try:
+                        os.unlink(tmp)
+                    except OSError:
+                        pass
+
+    def load(self):
+        """Read the sessions back, keeping those still within their limits."""
+        if not self.path:
+            return
+        try:
+            fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(fd) as fh:
+                saved = json.load(fh)
+            found = saved["sessions"] if saved.get("version") == 1 else {}
+            if not isinstance(found, dict):
+                raise TypeError("sessions is not an object")
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+            log.warning("ignored the saved sessions in %s: %s", self.path, exc)
+            return
+        now = self.clock()
+        for sid, v in found.items():
+            if (_valid_session(sid, v) and now - v["seen"] <= self.idle
+                    and now - v["created"] <= self.max_age):
+                self._by_token[sid] = Session(sid, v["user"], v["csrf"], v["created"],
+                                              v["seen"], v["hash"])
 
 
 def _addr_key(addr):

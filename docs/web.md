@@ -170,7 +170,7 @@ to one address.
 Run `sudo ./install.sh web` from the new version, then
 `sudo systemctl restart emuctl-web`. The installer keeps an existing unit
 file and polkit rule; compare them with the new ones in `systemd/` and
-`examples/polkit/` in case they changed. A restart logs everyone out.
+`examples/polkit/` in case they changed. A restart keeps everyone logged in.
 
 ## What it costs
 

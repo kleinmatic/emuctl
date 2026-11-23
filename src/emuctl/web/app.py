@@ -374,7 +374,7 @@ async def _login(request, app, addr, limiter):
     session = app[SESSIONS].new(user.name)
     log.info("%s logged in from %s", user.name, addr)
     resp = web.json_response({"user": user.name, "role": user.role, "csrf": session.csrf})
-    resp.set_cookie(COOKIE, session.token, httponly=True, secure=app[CONF].tls,
+    resp.set_cookie(COOKIE, session.cookie, httponly=True, secure=app[CONF].tls,
                     samesite="Strict", path="/")
     return resp
 
@@ -716,7 +716,7 @@ async def events(request):
                 event, payload = await asyncio.wait_for(q.get(), HEARTBEAT)
             except asyncio.TimeoutError:
                 event, payload = None, None
-            if event is END or app[SESSIONS].get(token, touch=False) is None:
+            if event is END or app[SESSIONS].get_id(token, touch=False) is None:
                 break
             await send(sse(event, payload) if event else b": ping\n\n")
     except (ConnectionResetError, asyncio.CancelledError, asyncio.TimeoutError):
@@ -743,6 +743,7 @@ async def sample_forever(app):
             if loop.time() - saved >= SAVE_EVERY:
                 saved = loop.time()
                 await asyncio.to_thread(sampler.save)
+                await asyncio.to_thread(app[SESSIONS].save)     # the idle clocks
         except Exception:
             log.exception("sampling failed")
         await asyncio.sleep(sampler.interval)
@@ -758,6 +759,7 @@ async def end_streams(app):
 
 async def start_background(app):
     await asyncio.to_thread(app[SAMPLER].load)
+    await asyncio.to_thread(app[SESSIONS].load)
     app[STATE]["sampler_task"] = asyncio.create_task(sample_forever(app))
 
 
@@ -771,6 +773,7 @@ async def stop_background(app):
             except asyncio.CancelledError:
                 pass
     await asyncio.to_thread(app[SAMPLER].save)
+    await asyncio.to_thread(app[SESSIONS].save)
 
 
 def known_names(conf):
@@ -787,7 +790,8 @@ def make_app(settings, conf, users=None, sampler=None, background=True):
                           client_max_size=64 * 1024)
     app[SETTINGS], app[CONF] = settings, conf
     app[USERS] = users or Users(conf.users_path)
-    app[SESSIONS] = Sessions(app[USERS])
+    app[SESSIONS] = Sessions(app[USERS], path=os.path.join(conf.state_dir, "sessions.json")
+                             if conf.state_dir else None)
     app[LIMITER] = LoginLimiter()
     app[SAMPLER] = sampler or Sampler(settings, history_file=conf.history_path)
     app[TOKENS] = Tokens(conf.tokens_path)

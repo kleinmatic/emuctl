@@ -66,10 +66,13 @@ These are the rules every change to the web code follows (they are also in
    `Secure` flag and logs a warning at every start.
 2. **Sessions.** Logging in sets a random 256-bit token in a cookie marked
    `HttpOnly`, `Secure` (unless TLS is off) and `SameSite=Strict`. Sessions
-   live in the daemon's memory and end after 12 hours in which the user did
-   nothing (the page's own timed refreshes do not count, so a forgotten tab
-   still times out), 24 hours after logging in whatever happens, on logout,
-   when the user is removed, or when the daemon restarts.
+   end after 12 hours in which the user did nothing (the page's own timed
+   refreshes do not count, so a forgotten tab still times out), 24 hours
+   after logging in whatever happens, on logout, when the user is removed,
+   or when their password changes. They survive a restart of the daemon:
+   it keeps them in `sessions.json` in its state directory, mode 0600, but
+   only the SHA-256 of each cookie, so the file cannot be turned back into a
+   login. To log everyone out, stop the daemon, delete that file, start it.
 3. **Requests from other sites are refused.** Every request that changes
    something, and every WebSocket, must carry an `Origin` header naming the
    page's own address, and every one but a WebSocket carries a per-session
