@@ -22,6 +22,7 @@ NEW_MODULES = [
     "src/emuctl/actions.py",
     "src/emuctl/hardware.py",
     "src/emuctl/network.py",
+    "src/emuctl/checks.py",
     "src/emuctl/web/",
 ]
 

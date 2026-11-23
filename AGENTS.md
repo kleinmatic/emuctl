@@ -141,7 +141,10 @@ explains them to users.
 2. Every request except the login page needs a session: a random 256-bit
    token in a cookie marked `HttpOnly`, `Secure` and `SameSite=Strict`, kept
    in memory, expiring after 12 hours idle (timed refreshes, sent with
-   `X-Emuctl-Background: 1`, do not count) and 24 hours after login.
+   `X-Emuctl-Background: 1`, do not count) and 24 hours after login. The one
+   other way in is an API token (`Authorization: Bearer`, `web/tokens.py`),
+   which acts as a viewer for GET requests only, never on a WebSocket and
+   never on a route marked `@sessions_only`.
 3. Every request that changes something, and every WebSocket upgrade, must
    carry an `Origin` header matching the daemon's own address; POSTs also
    carry the CSRF token.

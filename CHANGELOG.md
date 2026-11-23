@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- `locked = <reason>` in a guest's conf refuses every start, from
+  `emuctl start`, the web page or the service manager, with that reason.
+  `emuctl check`, `emuctl info` and the web page show it.
+- The web page's guest summary lists what `emuctl check` finds, and a
+  Notes tab shows the guest's `notes` file.
+- The graphs can show the last day as well as the last hour. The day, one
+  point a minute, is saved to `history_file` (in the daemon's state
+  directory by default) and survives a restart.
+- An Energy tab on the host shows what is up, for how long, and what CPU
+  each guest has used now, over the hour and over the day.
+- Guests with a display get a thumbnail of their screen on the summary, at
+  most a minute old.
+- Read-only API tokens for scripts (`emuctl web token add <name>`), and
+  `/metrics` in Prometheus' format.
+
 ## 0.4.0 (2026-11-22)
 
 - The web page has a Display tab for guests whose emulator has a VNC
