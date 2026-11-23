@@ -90,11 +90,12 @@ export function hostView(tab, store) {
     ];
     const links = guestLinks(net);
     const table = h("table", { class: "data" },
-      h("thead", {}, h("tr", {}, ["Guest", "OS", "Emulator", "State", "Uptime"].map((t) => h("th", { text: t })),
+      h("thead", {}, h("tr", {}, h("th", { text: "Guest" }), h("th", { class: "wide-only", text: "OS" }),
+        h("th", { class: "wide-only", text: "Emulator" }), h("th", { text: "State" }), h("th", { text: "Uptime" }),
         h("th", { class: "num", text: "CPU" }), h("th", { class: "num", text: "Memory" }), h("th", { text: "Network" }))),
       h("tbody", {}, rows.map((r) => h("tr", {},
         h("td", {}, h("a", { href: `#/g/${encodeURIComponent(r.name)}/summary`, text: r.name })),
-        h("td", { text: r.os }), h("td", { class: "muted", text: r.emulator }),
+        h("td", { class: "wide-only", text: r.os }), h("td", { class: "muted wide-only", text: r.emulator }),
         h("td", {}, stateBadge(r)), h("td", { class: "mono", text: uptime(r.uptime) }),
         h("td", { class: "num", text: pct(r.cpu_pct) }), h("td", { class: "num", text: bytes(r.mem_bytes) }),
         h("td", { class: "mono muted", text: (links.get(r.name) || []).join(", ") || "—" })))));
@@ -135,7 +136,7 @@ export function hostView(tab, store) {
     const now = rows.reduce((a, r) => a + (r.cpu_pct || 0), 0);
     const today = rows.reduce((a, r) => a + r.cpu_hours_24h, 0);
     const up = rows.filter((r) => isUp(r.state));
-    const hours = (m) => (m ? `${(m / 60).toFixed(1)} h` : "—");
+    const hours = (m) => (!m ? "—" : m < 60 ? `${m} min` : `${(m / 60).toFixed(1)} h`);
     return [
       h("div", { class: "stats" },
         stat("Guests use now", `${(now / 100).toFixed(2)} CPUs`, now / 100 / power.cpus,

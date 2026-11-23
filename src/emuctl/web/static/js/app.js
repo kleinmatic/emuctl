@@ -113,7 +113,14 @@ async function boot() {
   store.setTasks(await get("/api/tasks"));
   document.getElementById("tasks").append(taskPanel(store));
   store.listeners.add(renderTree);
-  window.addEventListener("hashchange", show);
+  window.addEventListener("hashchange", () => { setTree(false); show(); });
+  // On a phone the guest list folds away behind a button in the bar.
+  const toggle = document.getElementById("tree-toggle");
+  function setTree(open) {
+    document.body.classList.toggle("tree-open", open);
+    toggle.setAttribute("aria-expanded", String(open));
+  }
+  toggle.addEventListener("click", () => setTree(!document.body.classList.contains("tree-open")));
   search.addEventListener("input", renderTree);
   const theme = document.getElementById("theme");
   theme.textContent = currentTheme() === "dark" ? "Light" : "Dark";

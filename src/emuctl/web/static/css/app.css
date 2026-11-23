@@ -200,11 +200,36 @@ details > summary { cursor: pointer; color: var(--muted); }
 .login .btn { margin-top: 16px; width: 100%; justify-content: center; }
 .login .msg { margin-top: 12px; color: var(--bad); min-height: 1.4em; }
 
+.bar .tree-toggle { display: none; }
 @media (max-width: 700px) {
-  nav.tree { max-width: none; flex-basis: 100%; border-right: 0; border-bottom: 1px solid var(--line); }
-  .bar input[type=search] { width: 140px; }
-  .kv { grid-template-columns: 110px 1fr; }
-  .grid { grid-template-columns: 1fr; }
+  /* A phone: the guest list folds away behind "Guests" in the bar. */
+  .bar { gap: 6px 14px; padding: 6px 12px; }
+  .bar .where { font-size: 12px; }
+  .bar .tree-toggle { display: inline; }
+  .bar .tree-toggle::after { content: " ▾"; }
+  body.tree-open .bar .tree-toggle::after { content: " ▴"; }
+  .bar label.spacer { display: none; }
+  body.tree-open .bar label.spacer { display: block; order: 10; flex-basis: 100%; }
+  .bar input[type=search] { width: 100%; }
+  .bar #user { margin-left: auto; }
+  nav.tree { display: none; max-width: none; flex-basis: 100%; border-right: 0;
+    border-bottom: 1px solid var(--line); }
+  body.tree-open nav.tree { display: block; }
+  nav.tree a { padding: 9px 14px; }
+  nav.tree a.guest { padding-left: 30px; }
+  .titlebar { padding: 10px 12px; }
+  .titlebar .actions { margin-left: 0; width: 100%; }
+  .tabs { padding: 0 4px; }
+  .tab { padding: 10px 10px; }
+  .content { padding: 12px; gap: 12px; }
+  .kv { grid-template-columns: 100px 1fr; }
+  .grid { grid-template-columns: 1fr; gap: 12px; }
+  .stats { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat .value { font-size: 16px; }
+  .display-box { height: 60vh; min-height: 0; }
+  .terminal { min-height: 360px; }
+  dialog.dialog { padding: 14px; }
+  .wide-only { display: none; }
 }
 
 /* actions */
