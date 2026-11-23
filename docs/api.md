@@ -28,14 +28,18 @@ emuctl_3kQ...
 $ curl -k -H "Authorization: Bearer emuctl_3kQ..." https://host:8600/api/guests
 ```
 
-A token is a viewer that can only read: any GET route marked (viewer)
-below, and `/metrics`. It cannot start or stop anything, open a console, a
-display or a thumbnail, or use `/api/session` or `/api/events`, which belong
-to the page. It needs no cookie, CSRF token or Origin. The token is printed
-once; the file (`tokens_file`, by default `/etc/emuctl/web-tokens`, root's
-and readable by the daemon) keeps only its SHA-256. `emuctl web token list`
-names the tokens; `emuctl web token revoke <name>` ends one at once. A wrong
-token is a 401, a token used for anything but reading a 403.
+A token reads status and numbers, and nothing else: `/metrics`,
+`GET /api/host`, `/api/host/network`, `/api/energy`, `/api/guests`, and for
+one guest `/api/guests/{guest}`, `/usage`, `/network` and `/hardware`. It
+cannot read console or supervisor logs, notes, `emuctl check` results, task
+output or a screen thumbnail, which may hold passwords; it cannot start or
+stop anything or open a console or display; and `/api/session` and
+`/api/events` belong to the page. It needs no cookie, CSRF token or Origin.
+The token is printed once; the file (`tokens_file`, by default
+`/etc/emuctl/web-tokens`, root's and readable by the daemon) keeps only its
+SHA-256. `emuctl web token list` names the tokens; `emuctl web token revoke
+<name>` ends one at once. A wrong token is a 401, a token used for anything
+else a 403.
 
 ### `GET /metrics` (viewer)
 

@@ -156,7 +156,7 @@ def write_users(path, users, line=lambda u: f"{u.name}:{u.role}:{u.hash}"):
     it. Anywhere else it is the writer's own, mode 0600.
     """
     d = os.path.dirname(path) or "."
-    fd, tmp = tempfile.mkstemp(dir=d, prefix=f".{os.path.basename(path)}.")
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".emuctl-web.")
     try:
         gid = _daemon_gid() if os.geteuid() == 0 else None
         if gid is not None:

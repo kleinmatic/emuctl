@@ -22,6 +22,7 @@ def test_web_conf_defaults():
     assert c.history_path == "/var/lib/emuctl-web/history.json"
     assert conf.parse_web_conf("history_file = off\n").history_path is None
     assert conf.parse_web_conf("history_file = /h.json\n").history_path == "/h.json"
+    assert conf.parse_web_conf("tokens_file =\n").tokens_path == "/etc/emuctl/web-tokens"
 
 
 def test_web_conf_values():

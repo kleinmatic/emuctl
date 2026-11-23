@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """API tokens: read-only access for scripts and monitoring.
 
-A token is sent as `Authorization: Bearer <token>` and acts as a viewer for
-GET requests only: it can read what the page shows and /metrics, and can
+A token is sent as `Authorization: Bearer <token>` and reads status only:
+GET requests to the routes app.py marks @token_ok (guests, host, numbers,
+/metrics). It cannot read logs, notes, task output or a screen, and can
 start, stop or type at nothing. The tokens file has one line per token:
 
     name:sha256 of the token:created (Unix time)
@@ -69,7 +70,8 @@ def revoke_token(path, name):
 
 
 def list_tokens(path):
-    return list(auth.read_users(path, parse=parse_tokens).values())
+    """The tokens in `path`; AuthError if it exists but cannot be read."""
+    return list(auth.read_users(path, strict=True, parse=parse_tokens).values())
 
 
 class Tokens:

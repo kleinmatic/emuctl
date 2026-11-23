@@ -57,6 +57,10 @@ class WebConf:
         return self.history_file or os.path.join(self.state_dir, "history.json")
 
     @property
+    def tokens_path(self):
+        return self.tokens_file or TOKENS_FILE
+
+    @property
     def users_path(self):
         return self.users_file or USERS_FILE
 

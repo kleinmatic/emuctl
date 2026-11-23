@@ -50,13 +50,13 @@ def cmd_token(args):
     except WebConfError as exc:
         sys.stderr.write(f"emuctl: {exc}\n")
         return 2
-    path = conf.tokens_file
+    path = conf.tokens_path
     try:
         if args.token_action == "add":
             token = tokens.add_token(path, args.name)
             print(token)
             sys.stderr.write(f"emuctl: made the API token {args.name!r}. It is shown only now; "
-                             f"it reads the guests and /metrics, and changes nothing.\n")
+                             f"it reads guest status and /metrics, and changes nothing.\n")
         elif args.token_action == "revoke":
             tokens.revoke_token(path, args.name)
             print(f"revoked {args.name}")

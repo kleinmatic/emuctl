@@ -46,13 +46,14 @@ and no password reset by mail: the admin sets passwords with
 `emuctl web passwd`.
 
 Scripts and monitoring use **API tokens** (`emuctl web token add <name>`)
-instead. A token can only read: GET requests to the routes a viewer may
-use, and `/metrics`. It cannot start or stop a guest, open a console or a
-display, or see the screen. Tokens are 256 random bits, sent as
-`Authorization: Bearer`; the tokens file keeps only their SHA-256, and is
-root's, so the daemon cannot add one. Anyone holding a token can read what
-the page shows, console logs included, so treat one like a password and
-revoke it (`emuctl web token revoke <name>`) when it is no longer needed.
+instead. A token reads status and numbers only: the guest list, each
+guest's state, usage, network and hardware, the host, and `/metrics`. It
+cannot read logs, notes or task output (any of which may hold a password),
+see a screen, start or stop a guest, or open a console. Tokens are 256
+random bits, sent as `Authorization: Bearer`; the tokens file keeps only
+their SHA-256, and is root's, so the daemon cannot add one. A new route is
+closed to tokens unless it is marked for them. Revoke a token
+(`emuctl web token revoke <name>`) when it is no longer needed.
 
 ## How it is protected
 

@@ -142,9 +142,10 @@ explains them to users.
    token in a cookie marked `HttpOnly`, `Secure` and `SameSite=Strict`, kept
    in memory, expiring after 12 hours idle (timed refreshes, sent with
    `X-Emuctl-Background: 1`, do not count) and 24 hours after login. The one
-   other way in is an API token (`Authorization: Bearer`, `web/tokens.py`),
-   which acts as a viewer for GET requests only, never on a WebSocket and
-   never on a route marked `@sessions_only`.
+   other way in is an API token (`Authorization: Bearer`, `web/tokens.py`):
+   GET requests only, never a WebSocket, and only on routes marked
+   `@token_ok`. Mark a route so only if it shows status or numbers, never
+   logs, notes, task output or a screen.
 3. Every request that changes something, and every WebSocket upgrade, must
    carry an `Origin` header matching the daemon's own address; POSTs also
    carry the CSRF token.

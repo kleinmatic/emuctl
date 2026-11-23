@@ -151,8 +151,9 @@ sudo emuctl web token list
 sudo emuctl web token revoke prometheus
 ```
 
-Send it as `Authorization: Bearer <token>`. It can read everything a viewer
-can (the JSON API and `/metrics`, in Prometheus' format) and change nothing.
+Send it as `Authorization: Bearer <token>`. It reads guest status and
+numbers (part of the JSON API, and `/metrics` in Prometheus' format), not
+logs or notes, and changes nothing.
 [api.md](api.md#api-tokens) has the routes and a Prometheus job.
 
 ## Who can reach it

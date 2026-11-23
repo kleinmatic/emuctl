@@ -14,7 +14,8 @@
   each guest has used now, over the hour and over the day.
 - Guests with a display get a thumbnail of their screen on the summary, at
   most a minute old.
-- Read-only API tokens for scripts (`emuctl web token add <name>`), and
+- Read-only API tokens for scripts and monitoring (`emuctl web token add
+  <name>`), which read guest status and numbers but not logs or notes, and
   `/metrics` in Prometheus' format.
 - The Console tab looks like a terminal: an 80 x 24 screen in amber, green
   or white phosphor (or the plain look, chosen per browser), in a font

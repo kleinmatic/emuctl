@@ -43,6 +43,7 @@ def test_token_command(tmp_path, monkeypatch, capsys):
     assert "no API tokens" in capsys.readouterr().out
     assert web_main.cmd_token(types.SimpleNamespace(token_action="add", name="grafana")) == 0
     printed = capsys.readouterr().out.strip()
+    assert printed.startswith("emuctl_")
     assert tokens.Tokens(str(tmp_path / "tokens")).check(printed).name == "grafana"
     assert web_main.cmd_token(types.SimpleNamespace(token_action="list")) == 0
     assert "grafana" in capsys.readouterr().out
@@ -59,9 +60,15 @@ def token(client, tmp_path):  # noqa: F811
 
 async def test_a_token_reads(client, token):  # noqa: F811
     for path in ("/api/guests", "/api/guests/g1", "/api/host", "/api/energy", "/metrics",
-                 "/api/guests/g1/usage?window=24h", "/api/tasks"):
+                 "/api/guests/g1/usage?window=24h", "/api/guests/g1/hardware"):
         r = await client.get(path, headers=token)
         assert r.status == 200, path
+
+
+async def test_a_token_reads_no_logs_notes_or_task_output(client, token):  # noqa: F811
+    for path in ("/api/guests/g1/log", "/api/guests/g1/notes", "/api/guests/g1/check",
+                 "/api/tasks", "/api/tasks/1", "/api/guests/g1/thumbnail"):
+        assert (await client.get(path, headers=token)).status == 403, path
 
 
 async def test_a_token_changes_nothing_and_opens_nothing(client, token):  # noqa: F811
@@ -93,6 +100,17 @@ async def test_metrics_text(client, token):  # noqa: F811
     assert 'emuctl_guest_cpu_seconds_total{guest="g1"} 4.5' in text
     assert 'emuctl_guest_locked{guest="g2"} 1' in text
     assert 'emuctl_guest_uptime_seconds{guest="g2"}' not in text
+
+
+def test_an_unreadable_tokens_file_is_not_called_empty(tmp_path):
+    import os
+    if os.geteuid() == 0:
+        pytest.skip("root reads any file")
+    p = tmp_path / "tokens"
+    tokens.add_token(str(p), "grafana")
+    p.chmod(0)                                  # as for a user not in the daemon's group
+    with pytest.raises(auth.AuthError, match="cannot read"):
+        tokens.list_tokens(str(p))
 
 
 def test_metric_labels_are_escaped():

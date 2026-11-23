@@ -36,6 +36,10 @@ and most of them are enforced for you by the middleware in
    - The decorator order matters: `@routes.<method>` outermost, then
      `@needs(role)` or `@public`. A handler with neither is refused with a
      403, on purpose.
+   - API tokens cannot reach the route unless you add `@token_ok` under
+     `@needs`. Add it only to a GET that shows status or numbers, never one
+     that shows logs, notes, task output or a screen; test that a token gets
+     200 there (`tests/test_web_tokens.py`).
    - Name the guest part of the path `{g}`. `guest_middleware` then checks it
      against the conf-name pattern and the real guests, and 404s before your
      handler runs. Use `request["guest"]`, never `request.match_info["g"]`.

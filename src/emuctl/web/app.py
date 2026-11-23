@@ -89,9 +89,10 @@ def needs(role):
     return mark
 
 
-def sessions_only(handler):
-    """A route for the page itself, not for API tokens."""
-    handler.sessions_only = True
+def token_ok(handler):
+    """A route an API token may read: status and numbers, never logs, notes,
+    task output or a screen. Routes without it are for logged-in users only."""
+    handler.token_ok = True
     return handler
 
 
@@ -217,7 +218,8 @@ class TokenUser:
 
 
 async def token_request(request, handler, presented):
-    """An API token reads; it never changes anything, and opens no console."""
+    """An API token reads status; it never changes anything, opens no console,
+    and reads only routes marked @token_ok."""
     token = request.app[TOKENS].check(presented)
     if token is None:
         log.warning("refused an unknown API token from %s for %s", request.remote, request.path)
@@ -225,7 +227,7 @@ async def token_request(request, handler, presented):
     role = getattr(request.match_info.handler, "role", None)
     if (request.method not in ("GET", "HEAD") or changes_something(request)
             or role is None or ROLE_RANK[role] > ROLE_RANK["viewer"]
-            or getattr(request.match_info.handler, "sessions_only", False)):
+            or not getattr(request.match_info.handler, "token_ok", False)):
         raise refuse(request, web.HTTPForbidden, "an API token can only read")
     request["user"] = TokenUser(token)
     return await handler(request)
@@ -310,7 +312,6 @@ async def login_page(request):
 
 @routes.get("/")
 @needs("viewer")
-@sessions_only
 async def index_page(request):
     return web.FileResponse(os.path.join(STATIC, "index.html"))
 
@@ -380,7 +381,6 @@ async def _login(request, app, addr, limiter):
 
 @routes.post("/api/logout")
 @needs("viewer")
-@sessions_only
 async def logout(request):
     request.app[SESSIONS].end(request["session"].token)
     log.info("%s logged out", request["user"].name)
@@ -391,7 +391,6 @@ async def logout(request):
 
 @routes.get("/api/session")
 @needs("viewer")
-@sessions_only
 async def session_info(request):
     s, u = request["session"], request["user"]
     return web.json_response({"user": u.name, "role": u.role, "csrf": s.csrf,
@@ -412,6 +411,7 @@ def find_row(rows, name):
 
 @routes.get("/api/host")
 @needs("viewer")
+@token_ok
 async def host(request):
     s = request.app[SETTINGS]
     out = await asyncio.to_thread(
@@ -438,6 +438,7 @@ async def cached(app, key, build):
 
 @routes.get("/api/host/network")
 @needs("viewer")
+@token_ok
 async def host_network(request):
     from .. import network
     s = request.app[SETTINGS]
@@ -446,6 +447,7 @@ async def host_network(request):
 
 @routes.get("/metrics")
 @needs("viewer")
+@token_ok
 async def metrics(request):
     """Prometheus' text format. Read with an API token: emuctl web token add <name>."""
     from . import metrics as m
@@ -456,6 +458,7 @@ async def metrics(request):
 
 @routes.get("/api/energy")
 @needs("viewer")
+@token_ok
 async def energy(request):
     await current_rows(request.app)
     return web.json_response({"cpus": os.cpu_count(), "guests": request.app[SAMPLER].energy()})
@@ -463,12 +466,14 @@ async def energy(request):
 
 @routes.get("/api/guests")
 @needs("viewer")
+@token_ok
 async def guests(request):
     return web.json_response(await current_rows(request.app))
 
 
 @routes.get("/api/guests/{g}")
 @needs("viewer")
+@token_ok
 async def guest(request):
     from ..status import guest_status
     s, name = request.app[SETTINGS], request["guest"]
@@ -482,6 +487,7 @@ WINDOWS = {"1h": 3600, "24h": 86400}
 
 @routes.get("/api/guests/{g}/usage")
 @needs("viewer")
+@token_ok
 async def guest_usage(request):
     window = request.query.get("window", "1h")
     if window not in WINDOWS:
@@ -492,6 +498,7 @@ async def guest_usage(request):
 
 @routes.get("/api/guests/{g}/network")
 @needs("viewer")
+@token_ok
 async def guest_network(request):
     from .. import network
     s, name = request.app[SETTINGS], request["guest"]
@@ -534,6 +541,7 @@ async def guest_notes(request):
 
 @routes.get("/api/guests/{g}/hardware")
 @needs("viewer")
+@token_ok
 async def guest_hardware(request):
     cfg = guest_config(request)
     return web.json_response(await asyncio.to_thread(data.guest_hardware, cfg))
@@ -611,7 +619,6 @@ CONSOLES_PER_SESSION = 8
 
 @routes.get("/api/guests/{g}/console")
 @needs("viewer")
-@sessions_only
 async def guest_console(request):
     """WebSocket. Viewing needs a viewer; taking the keyboard, an operator."""
     from . import console
@@ -689,7 +696,6 @@ def end_displays(app, token):
 
 @routes.get("/api/events")
 @needs("viewer")
-@sessions_only
 async def events(request):
     app, token = request.app, request["session"].token
     if sum(t == token for t in app[HUB].subs.values()) >= STREAMS_PER_SESSION:
@@ -783,7 +789,7 @@ def make_app(settings, conf, users=None, sampler=None, background=True):
     app[SESSIONS] = Sessions(app[USERS])
     app[LIMITER] = LoginLimiter()
     app[SAMPLER] = sampler or Sampler(settings, history_file=conf.history_path)
-    app[TOKENS] = Tokens(conf.tokens_file)
+    app[TOKENS] = Tokens(conf.tokens_path)
     hub = Hub()
     app[HUB] = hub
     app[SESSIONS].on_end.append(hub.end_session)
@@ -804,7 +810,7 @@ def make_app(settings, conf, users=None, sampler=None, background=True):
     app[SESSIONS].on_end.append(lambda token: end_displays(app, token))
     app[SESSIONS].on_end.append(app[STATE]["consoles"].end_session)
     for p in (conf.state_dir, conf.cert_path, conf.key_path, conf.users_path,
-              conf.history_path, conf.tokens_file):
+              conf.history_path, conf.tokens_path):
         if p and p not in data.PROTECTED:
             data.PROTECTED.append(p)
     app.on_response_prepare.append(add_security_headers)
