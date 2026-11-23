@@ -107,14 +107,17 @@ The guest's serial console, shared with `emuctl console` and anyone else
 looking. It opens with the last part of the console log, then shows what the
 guest prints as it happens.
 
-The screen is 80 columns by 24 lines, as the guests' consoles are, in a
-terminal's case. **Screen** chooses amber, green or white phosphor, or a
-plain look; the choice is kept in your browser. The phosphor looks use a
-font after DEC's VT320 that has the line-drawing characters old systems
-draw forms and menus with. The lamps under the screen show **ON LINE**
-while the page is connected, **LOCAL** when it is not, and **KBD LOCKED**
-while your keys are not being sent. On a narrow screen it scrolls sideways
-rather than shrink past reading.
+**Screen** chooses the look, for each guest separately; your browser
+remembers it. **Amber**, **Green** and **White** are vintage: an 80 by 24
+screen, as the guests' consoles are, in a terminal's case, in a font after
+DEC's VT320 that has the line-drawing characters old systems draw forms and
+menus with. The lamps under the screen show **ON LINE** while the page is
+connected, **LOCAL** when it is not, and **KBD LOCKED** while your keys are
+not being sent. On a narrow screen it scrolls sideways rather than shrink
+past reading. **Modern** is an ordinary terminal that fills the space, in
+full colour, for a guest where the vintage look gets in the way. Until you
+choose, a guest gets the default the admin set (`console_look` in
+`web.conf`; amber if unset).
 
 - It opens **watching**: what you type is not sent. Press **Take keyboard**
   to type; the banner turns blue and says so. Only one person types at a

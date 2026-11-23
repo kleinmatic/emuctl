@@ -81,7 +81,7 @@ test("the console's font size keeps 80 x 24 whole, and its pixels whole", () => 
   assert.equal(ph.fontFor("amber", 700, 700).size, 20);        // 640 wide
   assert.equal(ph.fontFor("amber", 300, 300).size, 15);        // the least; it scrolls
   assert.equal(ph.fontFor("amber", 1600, 500).size, 20);       // the height decides
-  assert.equal(ph.fontFor("plain", 2000, 2000).size, 15);
+  assert.equal(ph.fontFor("modern").size, 13);
 });
 
 test("a phosphor turns every colour into its own", () => {
@@ -89,5 +89,5 @@ test("a phosphor turns every colour into its own", () => {
   assert.equal(t.red, ph.PHOSPHORS.green.fg);
   assert.equal(t.brightBlue, ph.PHOSPHORS.green.bright);
   assert.equal(t.black, ph.PHOSPHORS.green.bg);
-  assert.equal(ph.xtermTheme("plain").red, undefined);         // plain keeps the colours
+  assert.equal(ph.xtermTheme("modern").red, undefined);        // modern keeps the colours
 });

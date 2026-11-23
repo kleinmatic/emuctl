@@ -4,20 +4,23 @@
 // The screen is 80 x 24, as the guests' consoles are, in a terminal's case
 // whose lamps say what the page is doing: ON LINE when connected, LOCAL when
 // not, KBD LOCKED while your keys are not sent.
+import { FitAddon } from "../../vendor/xterm/addon-fit.mjs";
 import { Terminal } from "../../vendor/xterm/xterm.mjs";
 import { get, guestPath } from "../api.js";
 import { h, overlay } from "../dom.js";
 import { slowSend } from "../keys.js";
-import { COLS, PHOSPHORS, ROWS, fontFor, storePhosphor, storedPhosphor, xtermTheme } from "../phosphor.js";
+import { COLS, LOOKS, PHOSPHORS, ROWS, fontFor, storeLook, storedLook, xtermTheme } from "../phosphor.js";
 
 const KEYS = [["Ctrl-P", "\x10"], ["Ctrl-E", "\x05"], ["Ctrl-C", "\x03"], ["Ctrl-]", "\x1d"]];
 
 export function consoleView(name, store) {
   const enc = new TextEncoder();
-  let look = storedPhosphor();
+  let look = storedLook(name, store.session && store.session.console_look);
   const term = new Terminal({ cols: COLS, rows: ROWS, scrollback: 5000, convertEol: false,
     cursorBlink: true, disableStdin: true, letterSpacing: 0, theme: xtermTheme(look),
     fontFamily: fontFor(look, 9999, 9999).family });
+  const fit = new FitAddon();
+  term.loadAddon(fit);
   const screen = h("div", { class: "terminal", "aria-label": `Console of ${name}` });
   const frame = h("div", { class: "terminal-frame" }, screen);
   const lamp = (label) => h("span", { class: "lamp", text: label });
@@ -27,7 +30,7 @@ export function consoleView(name, store) {
       h("div", { class: "vt-bezel" }, frame),
       h("div", { class: "vt-strip" }, h("span", { class: "vt-badge", text: name }),
         h("span", { class: "lamps", "aria-hidden": "true" }, lamps.online, lamps.local, lamps.locked))));
-  const box = h("div", { class: "vt-box" }, vt);
+  const box = h("div", { class: "vt-box", dataset: { look } }, vt);
   function setLamps(online, typingNow) {
     lamps.online.classList.toggle("on", online);
     lamps.local.classList.toggle("on", !online);
@@ -35,12 +38,13 @@ export function consoleView(name, store) {
   }
   setLamps(false, false);
   const lookSel = h("select", { "aria-label": "Screen" },
-    Object.entries(PHOSPHORS).map(([id, p]) => h("option", { value: id, text: p.label })));
+    LOOKS.map((id) => h("option", { value: id, text: PHOSPHORS[id].label })));
   lookSel.value = look;
   lookSel.addEventListener("change", () => {
     look = lookSel.value;
-    storePhosphor(look);
+    storeLook(name, look);
     vt.dataset.look = look;
+    box.dataset.look = look;
     term.options.theme = xtermTheme(look);
     sizeScreen();
   });
@@ -190,6 +194,16 @@ export function consoleView(name, store) {
   // The largest font that shows the whole 80 x 24 screen in the room there
   // is; below the smallest size the screen scrolls sideways instead.
   function sizeScreen() {
+    if (look === "modern") {
+      // Modern: an ordinary terminal, as many columns and rows as fit.
+      const f = fontFor(look);
+      term.options.fontFamily = f.family;
+      term.options.lineHeight = f.lineHeight;
+      term.options.fontSize = f.size;
+      try { fit.fit(); } catch (e) { /* not visible */ }
+      return;
+    }
+    if (term.cols !== COLS || term.rows !== ROWS) term.resize(COLS, ROWS);
     const pop = document.body.classList.contains("popout");
     const width = Math.max(200, box.clientWidth - 80);
     const height = Math.max(240, window.innerHeight - (pop ? 150 : 330));

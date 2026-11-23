@@ -79,6 +79,7 @@ task_log = /var/log/emuctl/web-tasks.log
 server_names =          # other names the page is reached by, comma-separated
 history_file =          # empty: history.json in state_dir; off: not saved
 tokens_file = /etc/emuctl/web-tokens   # read-only API tokens: emuctl web token
+console_look = amber    # amber, green, white or modern: the Console tab until a user picks
 ```
 
 `history_file` holds the last day of the graphs, one point a minute per

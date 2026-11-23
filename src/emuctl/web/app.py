@@ -394,7 +394,8 @@ async def logout(request):
 async def session_info(request):
     s, u = request["session"], request["user"]
     return web.json_response({"user": u.name, "role": u.role, "csrf": s.csrf,
-                              "version": full_version()})
+                              "version": full_version(),
+                              "console_look": request.app[CONF].console_look})
 
 
 async def current_rows(app):

@@ -86,8 +86,10 @@ Ends the session. `{"ok": true}`.
 ### `GET /api/session` (viewer)
 
 ```json
-{"user": "alice", "role": "admin", "csrf": "Zf3...k1", "version": "0.3.0"}
+{"user": "alice", "role": "admin", "csrf": "Zf3...k1", "version": "0.5.0",
+ "console_look": "amber"}
 ```
+`console_look` is `web.conf`'s default for the Console tab.
 
 ## The host
 

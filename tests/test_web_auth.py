@@ -23,6 +23,8 @@ def test_web_conf_defaults():
     assert conf.parse_web_conf("history_file = off\n").history_path is None
     assert conf.parse_web_conf("history_file = /h.json\n").history_path == "/h.json"
     assert conf.parse_web_conf("tokens_file =\n").tokens_path == "/etc/emuctl/web-tokens"
+    assert c.console_look == "amber"
+    assert conf.parse_web_conf("console_look = modern\n").console_look == "modern"
 
 
 def test_web_conf_values():
@@ -35,7 +37,8 @@ def test_web_conf_values():
 @pytest.mark.parametrize("text,match", [
     ("port = 0\n", "port"), ("port = http\n", "port"), ("tls = maybe\n", "tls"),
     ("tls_cert = /c\n", "together"), ("users_file = rel\n", "absolute"),
-    ("colour = blue\n", "unknown key"), ("just words\n", "key = value"),
+    ("colour = blue\n", "unknown key"), ("console_look = mauve\n", "console_look"),
+    ("just words\n", "key = value"),
 ])
 def test_web_conf_bad(text, match):
     with pytest.raises(conf.WebConfError, match=match):

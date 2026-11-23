@@ -17,10 +17,11 @@
 - Read-only API tokens for scripts and monitoring (`emuctl web token add
   <name>`), which read guest status and numbers but not logs or notes, and
   `/metrics` in Prometheus' format.
-- The Console tab looks like a terminal: an 80 x 24 screen in amber, green
-  or white phosphor (or the plain look, chosen per browser), in a font
-  after DEC's VT320 that has the line-drawing characters old systems draw
-  forms with. Lamps on the case show ON LINE, LOCAL and KBD LOCKED.
+- The Console tab can look like a terminal: an 80 x 24 screen in amber,
+  green or white phosphor, in a font after DEC's VT320 that has the
+  line-drawing characters old systems draw forms with, with lamps showing
+  ON LINE, LOCAL and KBD LOCKED. Or "modern": an ordinary terminal. Each
+  user picks per guest; `console_look` in `web.conf` sets the default.
 - A phone layout: the guest list folds behind a "Guests" button.
 
 ## 0.4.0 (2026-11-22)

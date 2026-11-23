@@ -17,7 +17,8 @@ STATE_DIR = "/var/lib/emuctl-web"
 USERS_FILE = os.path.join(ETC, "web-users")
 TOKENS_FILE = os.path.join(ETC, "web-tokens")
 KEYS = ("listen", "port", "tls", "tls_cert", "tls_key", "state_dir", "users_file", "task_log",
-        "server_names", "history_file", "tokens_file")
+        "server_names", "history_file", "tokens_file", "console_look")
+CONSOLE_LOOKS = ("amber", "green", "white", "modern")
 
 
 class WebConfError(Exception):
@@ -37,6 +38,7 @@ class WebConf:
     server_names: tuple = ()    # host names the page may be reached by, beyond the host's own
     history_file: str = ""      # empty: history.json in state_dir; "off": not saved
     tokens_file: str = TOKENS_FILE
+    console_look: str = "amber"  # the Console tab's look until a user picks one for a guest
 
     @property
     def self_signed(self):
@@ -93,6 +95,11 @@ def parse_web_conf(text, where="web.conf"):
                 if not re.fullmatch(r"[a-z0-9.-]+", n):
                     raise WebConfError(f"{where}: server_names: not a host name: {n!r}")
             out[k] = names
+        elif k == "console_look":
+            if v not in CONSOLE_LOOKS:
+                raise WebConfError(f"{where}: console_look must be one of "
+                                   f"{', '.join(CONSOLE_LOOKS)}, got {v!r}")
+            out[k] = v
         elif k == "history_file" and v == "off":
             out[k] = v
         elif k in ("tls_cert", "tls_key", "state_dir", "users_file", "task_log", "history_file",
