@@ -206,6 +206,9 @@ def cmd_log(settings, args):
 
 def cmd_console(settings, args):
     cfg = need_guest(settings, args.guest)
+    if not cfg.has_console:
+        die(f"{args.guest} has no serial console (console = none)"
+            + (f"; its screen is {'vnc://%s:%d' % cfg.display}" if cfg.display else ""), 2)
     if args.telnet:
         if not shutil.which("telnet"):
             die("no telnet client installed; omit --telnet to use the built-in one")

@@ -81,6 +81,8 @@ export function guestView(name, tab, store) {
     // The Display tab only for a guest whose conf names a display.
     const shown = tabs.find((t) => t.dataset.tab === "display");
     if (detail) shown.classList.toggle("hidden", !detail.display);
+    const consoleTab = tabs.find((t) => t.dataset.tab === "console");
+    if (detail && !detail.conf_error) consoleTab.classList.toggle("hidden", !detail.console);
     const notesTab = tabs.find((t) => t.dataset.tab === "notes");
     if (detail) notesTab.classList.toggle("hidden", !detail.notes);
   }
@@ -179,7 +181,7 @@ export function guestView(name, tab, store) {
           ["NIC", hw.nics.length ? hw.nics.map((n) => [n.model, n.host_if ? `on ${n.host_if}` : null].filter(Boolean).join(" ")).join(" · ") : null],
         ])));
     }
-    if (logs && !logs.missing) {
+    if (logs && !logs.missing && d.console) {
       cards.push(h("section", { class: "card" }, h("h2", { text: "Last console lines" }),
         h("pre", { class: "text", text: logs.text || "(empty)" })));
     }
@@ -249,6 +251,7 @@ export function guestView(name, tab, store) {
     const source = h("select", { "aria-label": "Log" },
       h("option", { value: "console", text: "Console log" }), h("option", { value: "supervisor", text: "Supervisor log" }));
     const lines = h("select", { "aria-label": "Lines" }, [100, 200, 1000, 5000].map((n) => h("option", { value: n, text: `last ${n} lines` })));
+    if (detail && !detail.console && logState.source === "console") logState.source = "supervisor";
     source.value = logState.source;
     lines.value = String(logState.lines);
     async function load() {

@@ -148,7 +148,7 @@ def guest_detail(settings, name, row):
         "stop_route": stop_route(cfg),
         "clean_stop": cfg.clean_stop,
         "exclusive_with": cfg.exclusive_with,
-        "console": {"bind": cfg.bind, "port": cfg.broker},
+        "console": {"bind": cfg.bind, "port": cfg.broker} if cfg.has_console else None,
         "display": ({"host": cfg.display[0], "port": cfg.display[1], "auth": cfg.display_auth}
                     if cfg.display else None),
         "guest_addr": cfg.guest_addr,

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Guests with no serial console, such as 86Box: `console = none`. Such a
+  guest is `ready` after `ready_after` seconds; `stop_signal` chooses the
+  signal that stops it (86Box needs `HUP`); and `display_command` starts a
+  helper such as Xvnc before the emulator and stops it after, with
+  `display_wait` naming the socket that must answer first. `emuctl console`
+  and the web page's Console tab say there is no console.
+- `kind = 86box`, guessed from the program name: the Hardware tab and
+  `emuctl info --hardware` read the machine's `86box.cfg`. A docs page for
+  86Box and an example conf.
+
 ## 0.5.0 (2026-11-22)
 
 - `locked = <reason>` in a guest's conf refuses every start, from

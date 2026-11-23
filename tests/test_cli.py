@@ -179,3 +179,17 @@ def test_start_reports_a_refusal_without_calling_the_service_manager(
     assert cli.main(["start", "b"]) == 2
     assert called == [] and "'a' is ready" in capsys.readouterr().err
     assert cli.main(["start", "a"]) == 0 and called == []        # already running
+
+
+def test_console_of_a_guest_with_none_is_refused(settings, tmp_path, monkeypatch, capsys):
+    (tmp_path / "s1").mkdir()
+    with open(settings.conf_path("s1"), "w") as fh:
+        fh.write(f"name = s1\nworkdir = {tmp_path}/s1\nconsole = none\ncommand = x\n"
+                 f"disks = d.img\ndisplay = vnc://127.0.0.1:5901\n")
+    monkeypatch.setattr(cli, "load_settings", lambda: settings)
+    with pytest.raises(SystemExit) as e:
+        cli.main(["console", "s1"])
+    assert e.value.code == 2
+    assert "no serial console" in capsys.readouterr().err
+    errors, warnings = cli.check_guest(settings, "s1")
+    assert any("no stop_command" in w for w in warnings)

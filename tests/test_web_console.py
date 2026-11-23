@@ -384,3 +384,19 @@ async def test_only_the_greeting_is_stripped(stream, want):
     await console._from_broker(reader, ws, room)
     assert b"".join(x for x in ws.sent if isinstance(x, bytes)) == want
     assert "the console closed" in ws.sent[-1] and ws.closed
+
+
+async def test_a_guest_with_no_console_says_so(site, settings, tmp_path):
+    c, _ = site
+    (tmp_path / "s1").mkdir()
+    with open(settings.conf_path("s1"), "w") as fh:
+        fh.write(f"name = s1\nworkdir = {tmp_path}/s1\nconsole = none\ncommand = x\n"
+                 f"disks = d.img\n")
+    h = await session(c)
+    detail = await (await c.get("/api/guests/s1", headers=h)).json()
+    assert detail["console"] is None
+    ws = await c.ws_connect("/api/guests/s1/console",
+                            headers={"Cookie": h["Cookie"], "Origin": c.origin})
+    s = await status(ws)
+    assert s["running"] is False and "no serial console" in s["message"]
+    await ws.close()

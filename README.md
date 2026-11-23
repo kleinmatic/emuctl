@@ -1,7 +1,8 @@
 # emuctl
 
 emuctl runs emulated computers as system services. It works with SIMH, es40,
-QEMU, and other emulators that put their console on a TCP port.
+QEMU, 86Box, and other emulators that put their console on a TCP port or
+draw a screen.
 
 ```
 $ emuctl list
@@ -81,7 +82,8 @@ style of Proxmox. See [docs/web.md](docs/web.md) and the
 - [Stopping](docs/stopping.md): what happens to the guest when you stop it
 - [Monitoring](docs/monitoring.md): what the resource numbers mean
 - Emulators: [SIMH](docs/emulators/simh.md), [es40](docs/emulators/es40.md),
-  [QEMU](docs/emulators/qemu.md), [gxemul](docs/emulators/gxemul.md)
+  [QEMU](docs/emulators/qemu.md), [gxemul](docs/emulators/gxemul.md),
+  [86Box](docs/emulators/86box.md)
 - [Networking](docs/networking.md)
 - [Design](docs/design.md): why it works this way
 - [Versions and releases](docs/releasing.md)

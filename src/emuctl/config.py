@@ -10,12 +10,18 @@ import shlex
 from dataclasses import dataclass, field
 
 REQUIRED = ("name", "workdir", "command", "disks", "serials", "broker", "ready")
+# A guest with `console = none` (86Box: a screen, no serial console) needs none of these.
+CONSOLE_KEYS = ("serials", "broker", "ready")
+# Keys that only mean something with a serial console.
+NEEDS_CONSOLE = ("halted", "stop_wake", "console_timeout", "bind")
+CONSOLES = ("serial", "none")
+STOP_SIGNALS = ("TERM", "HUP", "INT", "QUIT")
 VALID_STOP_MODES = ("signal", "freeze", "monitor")
 # Keys whose value may contain '#', so an inline comment cannot be stripped.
 PATTERN_KEYS = ("ready", "halted", "command", "stop_command")
 STAGED = ("boot.", "stop.", "stuck.")
 HW_PREFIX = "hw."
-KINDS = ("simh", "es40", "qemu", "gxemul", "other")
+KINDS = ("simh", "es40", "qemu", "gxemul", "86box", "other")
 DISPLAY_AUTH = ("none", "vnc")
 # What a guest name may be. The web interface checks names from URLs against it.
 NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
@@ -25,6 +31,7 @@ KNOWN = set(REQUIRED) | {
     "stop_mode", "monitor", "stop_command", "stop_timeout", "stop_wake", "halt_grace",
     "exclusive_with", "kind", "config", "nics", "display", "display_auth",
     "display_password_file", "notes", "locked",
+    "console", "ready_after", "stop_signal", "display_command", "display_wait",
 }
 # Program names that are SIMH simulators, for guessing `kind`.
 SIMH_PREFIXES = ("vax", "microvax", "rtvax", "infoserver", "pdp", "altair", "nova", "eclipse",
@@ -35,7 +42,7 @@ SIMH_PREFIXES = ("vax", "microvax", "rtvax", "infoserver", "pdp", "altair", "nov
 def guess_kind(command):
     """The emulator kind, from the program name in `command`."""
     prog = os.path.basename(command[0]).lower() if command else ""
-    for kind in ("es40", "qemu", "gxemul"):
+    for kind in ("es40", "qemu", "gxemul", "86box"):
         if kind in prog:
             return kind
     return "simh" if prog.startswith(SIMH_PREFIXES) else "other"
@@ -98,6 +105,15 @@ class GuestConfig:
     notes: object = None                                # absolute path or None
     hw: dict = field(default_factory=dict)              # label -> text, in conf order
     locked: str = ""                                    # why it must not be started, or ""
+    console: str = "serial"                             # "serial", or "none" (no console)
+    ready_after: int = 10                               # console = none: ready after this
+    stop_signal: str = "TERM"                           # how stop_mode = signal stops it
+    display_command: list = field(default_factory=list)  # a helper run beside the emulator
+    display_wait: object = None                         # path that must answer first
+
+    @property
+    def has_console(self):
+        return self.console != "none"
 
     @property
     def clean_stop(self):
@@ -177,9 +193,20 @@ def _regex(key, value):
 
 def parse_config(text):
     kv = _split_kv(text)
+    console = kv.get("console", "serial")
+    if console not in CONSOLES:
+        raise ConfigError(f"console must be one of {CONSOLES}, got {console!r}")
     for key in REQUIRED:
-        if key not in kv:
+        if key not in kv and not (console == "none" and key in CONSOLE_KEYS):
             raise ConfigError(f"missing required key: {key}")
+    if console == "none":
+        used = [k for k in kv if k in CONSOLE_KEYS + NEEDS_CONSOLE
+                or k.startswith(STAGED)]
+        if used:
+            raise ConfigError(f"console = none: {', '.join(sorted(used))} need a serial "
+                              f"console; remove them")
+        if kv.get("stop_mode") == "freeze":
+            raise ConfigError("console = none: stop_mode = freeze needs a serial console")
 
     name = kv["name"]
     if not NAME_PATTERN.fullmatch(name):
@@ -189,18 +216,20 @@ def parse_config(text):
     if not os.path.isabs(workdir):
         raise ConfigError("workdir must be an absolute path")
 
-    try:
-        serials = [int(p) for p in kv["serials"].split(",") if p.strip()]
-    except ValueError:
-        raise ConfigError(f"serials must be a comma-separated list of ports, got {kv['serials']!r}")
-    if not serials:
-        raise ConfigError("serials must list at least one port")
-    if len(set(serials)) != len(serials):
-        raise ConfigError("duplicate port in serials")
-
-    broker = _int(kv, "broker", None)
-    if broker in serials:
-        raise ConfigError("broker port collides with a serial port")
+    serials, broker = [], None
+    if console == "serial":
+        try:
+            serials = [int(p) for p in kv["serials"].split(",") if p.strip()]
+        except ValueError:
+            raise ConfigError(f"serials must be a comma-separated list of ports, "
+                              f"got {kv['serials']!r}")
+        if not serials:
+            raise ConfigError("serials must list at least one port")
+        if len(set(serials)) != len(serials):
+            raise ConfigError("duplicate port in serials")
+        broker = _int(kv, "broker", None)
+        if broker in serials:
+            raise ConfigError("broker port collides with a serial port")
 
     env = {}
     for pair in kv.get("env", "").split():
@@ -262,6 +291,21 @@ def parse_config(text):
     if any(not label for label in hw):
         raise ConfigError("hw. keys need a label, such as hw.memory")
 
+    stop_signal = kv.get("stop_signal", "TERM").upper().removeprefix("SIG")
+    if stop_signal not in STOP_SIGNALS:
+        raise ConfigError(f"stop_signal must be one of {STOP_SIGNALS}, got {kv['stop_signal']!r}")
+    try:
+        display_command = shlex.split(kv.get("display_command", ""))
+    except ValueError as exc:
+        raise ConfigError(f"display_command: {exc}")
+    display_wait = kv.get("display_wait") or None
+    if display_wait and not os.path.isabs(display_wait):
+        raise ConfigError("display_wait must be an absolute path")
+    if display_wait and not display_command:
+        raise ConfigError("display_wait needs display_command")
+    ready_after = _int(kv, "ready_after", 10)
+    if ready_after < 0:
+        raise ConfigError("ready_after must not be negative")
     locked = kv.get("locked", "")
     if locked.lower() in ("no", "false", "off", "0", "none"):
         raise ConfigError(f"locked = {locked} would lock the guest: locked takes a reason; "
@@ -273,7 +317,7 @@ def parse_config(text):
         disks=disks, serials=serials, broker=broker,
         bind=kv.get("bind", "127.0.0.1"),
         boot_stages=_stages(kv, "boot."),
-        ready=_regex("ready", kv["ready"]),
+        ready=_regex("ready", kv["ready"]) if console == "serial" else "",
         halted=_regex("halted", halted) if halted else None,
         stuck=[_regex(k, v) for k, v in _family(kv, "stuck.")],
         boot_timeout=_int(kv, "boot_timeout", 900),
@@ -295,6 +339,8 @@ def parse_config(text):
         notes=rel(kv["notes"]) if kv.get("notes") else None,
         hw=hw,
         locked=locked,
+        console=console, ready_after=ready_after, stop_signal=stop_signal,
+        display_command=display_command, display_wait=display_wait,
     )
 
 

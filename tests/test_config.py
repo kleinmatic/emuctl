@@ -94,3 +94,16 @@ def test_locked_takes_a_reason_not_a_no():
     assert parse_config(MINIMAL + "locked = disk being copied\n").locked == "disk being copied"
     with pytest.raises(ConfigError, match="takes a reason"):
         parse_config(MINIMAL + "locked = no\n")
+
+
+def test_every_example_conf_parses():
+    import glob
+    import os
+    here = os.path.join(os.path.dirname(__file__), "..", "examples")
+    confs = [p for p in glob.glob(os.path.join(here, "*.conf"))
+             if os.path.basename(p) != "emuctl.conf"]
+    assert confs
+    for path in confs:
+        with open(path) as fh:
+            c = parse_config(fh.read())
+        assert c.unknown == [], path

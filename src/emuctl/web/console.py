@@ -126,6 +126,10 @@ async def serve(request, cfg, consoles, sessions, can_type=True):
     try:
         await ws.prepare(request)
         watch = asyncio.create_task(_watch(ws, sessions, token, consoles))
+        if not cfg.has_console:
+            await ws.send_str(json.dumps(room.status(ws, False,
+                                                     f"{guest} has no serial console")))
+            return ws
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(cfg.bind, cfg.broker), 5)

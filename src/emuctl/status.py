@@ -125,9 +125,15 @@ def format_info(settings, name, probe=probe_guest):
     line("command", " ".join(cfg.command))
     line("workdir", cfg.workdir)
     line("disks", ", ".join(cfg.disks) or "none (diskless)")
-    line("console", f"emuctl console {cfg.name}   (broker {cfg.bind}:{cfg.broker}, shared)")
-    line("serials", ", ".join(str(p) for p in cfg.serials)
-         + "   (held by the supervisor; do not connect)")
+    if cfg.has_console:
+        line("console", f"emuctl console {cfg.name}   (broker {cfg.bind}:{cfg.broker}, shared)")
+        line("serials", ", ".join(str(p) for p in cfg.serials)
+             + "   (held by the supervisor; do not connect)")
+    else:
+        line("console", f"none; ready {cfg.ready_after}s after the emulator starts")
+    if cfg.display_command:
+        line("helper", " ".join(cfg.display_command)
+             + (f"   (waits for {cfg.display_wait})" if cfg.display_wait else ""))
     if cfg.config_files:
         line("config", ", ".join(cfg.config_files))
     if cfg.guest_addr:
@@ -139,7 +145,8 @@ def format_info(settings, name, probe=probe_guest):
         line("display", f"vnc://{cfg.display[0]}:{cfg.display[1]}  ({auth})")
     if cfg.notes:
         line("notes", cfg.notes)
-    line("logs", f"{cfg.workdir}/console.log, {cfg.workdir}/{cfg.name}.out")
+    line("logs", (f"{cfg.workdir}/console.log, " if cfg.has_console else "")
+         + f"{cfg.workdir}/{cfg.name}.out")
     if cfg.stop_command:
         how = "runs stop_command, then stops the emulator"
     elif cfg.stop_stages:
@@ -148,6 +155,8 @@ def format_info(settings, name, probe=probe_guest):
         how = "saves the machine state and quits (SIMH)"
     else:
         how = "stops the emulator only: a POWER CUT for the guest OS"
+    if cfg.stop_signal != "TERM" and cfg.stop_mode == "signal":
+        how += f" (with SIG{cfg.stop_signal})"
     line("stop", how)
     if cfg.exclusive_with:
         line("exclusive", ", ".join(cfg.exclusive_with))

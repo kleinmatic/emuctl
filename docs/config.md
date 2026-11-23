@@ -19,6 +19,9 @@ comments on their own line there.
 | `broker` | TCP port where emuctl re-serves the console. |
 | `ready` | Regular expression that means the guest finished booting, usually its login prompt. |
 
+A guest with no serial console (86Box) sets `console = none` and leaves out
+`serials`, `broker` and `ready`; see [below](#guests-with-no-serial-console).
+
 ## Boot
 
 | Key | Default | Meaning |
@@ -55,7 +58,8 @@ See [stopping.md](stopping.md) for what each choice does to the guest.
 | `stop_command` | none | A program to run instead of `stop.<n>` stages. Use it when shutting down needs a credential. Not both. |
 | `stop_timeout` | 300 | Seconds allowed for the in-guest shutdown before the emulator is stopped anyway. |
 | `halt_grace` | 0 | Seconds to wait after `halted` appears during a stop, before stopping the emulator. For a guest whose last console line comes before it has finished writing to disk. |
-| `stop_mode` | `signal` | How the emulator itself is stopped: `signal` (SIGTERM), `monitor` (QEMU `quit`), or `freeze` (SIMH save and quit). |
+| `stop_mode` | `signal` | How the emulator itself is stopped: `signal` (SIGTERM, or `stop_signal`), `monitor` (QEMU `quit`), or `freeze` (SIMH save and quit). |
+| `stop_signal` | `TERM` | The signal `stop_mode = signal` sends: `TERM`, `HUP`, `INT` or `QUIT`. 86Box ignores SIGTERM and needs `HUP`. |
 | `monitor` | none | Path of QEMU's monitor socket. Required for `stop_mode = monitor`. |
 
 A `stop_command` gets these in its environment, plus the guest's `env` and
@@ -83,6 +87,21 @@ whatever the service manager provides (for example a systemd
 
 Unknown keys are ignored, and `emuctl check` lists them.
 
+## Guests with no serial console
+
+Some emulators have only a screen: 86Box draws a PC's display and has no
+serial console emuctl can hold. Such a guest says so:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `console` | `serial` | `none` for a guest with no serial console. Then `serials`, `broker` and `ready` are not needed, and stages, `halted`, `stop_wake`, `console_timeout`, `bind` and `stop_mode = freeze` are refused, since each needs a console. `emuctl console` says there is none; the web page shows no Console tab. |
+| `ready_after` | 10 | Seconds after the emulator starts before the guest counts as `ready`. With `guest_addr`, a guest that does not answer there is still `degraded`. |
+| `display_command` | none | A helper the supervisor starts before the emulator and stops after it, such as the `Xvnc` server 86Box draws on. Split like `command`; it gets the guest's `env`. Any guest may use it. |
+| `display_wait` | none | An absolute path that must exist before the emulator starts, for example the X server's socket `/tmp/.X11-unix/X1`. If it is a socket, it must also accept a connection: an X server makes the file before it listens. The start fails if it does not answer within 15 seconds. Needs `display_command`. |
+
+Stopping such a guest is a power cut for its OS unless a `stop_command` shuts
+it down first (over the network, say); `emuctl check` warns otherwise.
+
 ## Describing the machine
 
 These keys add nothing to how a guest runs. They tell `emuctl info`, the
@@ -90,7 +109,7 @@ monitoring commands and the web page what the guest is and where to look.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `kind` | guessed | `simh`, `es40`, `qemu`, `gxemul` or `other`. Guessed from the program name in `command`; set it when the guess is wrong, for example a SIMH binary with an unusual name. Decides how the emulator's config file is read for hardware details. |
+| `kind` | guessed | `simh`, `es40`, `qemu`, `gxemul`, `86box` or `other`. Guessed from the program name in `command`; set it when the guess is wrong, for example a SIMH binary with an unusual name. Decides how the emulator's config file is read for hardware details. |
 | `config` | none | The emulator's own config files, comma-separated, relative to `workdir`. emuctl reads them for hardware details and never changes them. `emuctl check` reports one that is missing. QEMU takes its configuration on the command line, so QEMU guests need no `config`. |
 | `nics` | found in `config` | Host network interfaces the guest uses (taps or veths), comma-separated. Only needed when emuctl cannot find them in the emulator's config. |
 | `display` | none | A VNC server showing the guest's screen, as `vnc://host:port`. |

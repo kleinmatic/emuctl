@@ -22,7 +22,7 @@ def conf(extra="", cmd="/usr/bin/es40 es40.cfg"):
     ("/usr/local/bin/vax vax.ini", "simh"),
     ("microvax3900 boot.ini", "simh"),
     ("pdp11", "simh"),
-    ("/usr/bin/86Box", "other"),
+    ("/usr/bin/86Box", "86box"),
 ])
 def test_kind_is_guessed_from_the_program(cmd, kind):
     assert conf(cmd=cmd).kind == kind

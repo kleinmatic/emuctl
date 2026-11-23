@@ -10,6 +10,12 @@ doing in a state file.
 Everything that touches the console runs on one thread, through pump(). A stop
 request only sets a flag; the main loop then runs the stop sequence while it
 keeps pumping, so the broker stays usable by a stop_command.
+
+A guest with `console = none` (86Box draws a screen and has no serial
+console) has no broker, stages or log; it is `ready` once the emulator has run
+for `ready_after` seconds. A `display_command` (Xvnc, say) is started before
+the emulator and stopped after it, and `display_wait` names a path, such as
+the X server's socket, that must answer before the emulator starts.
 """
 import os
 import re
@@ -31,6 +37,28 @@ CONSOLE_RETRY = 1       # seconds between attempts to connect the console
 STOP_GRACE = 60         # seconds for the emulator to exit before SIGKILL
 POKE_AFTER = 3          # seconds of total console silence before sending a CR
 MONITOR_DRAIN = 10      # seconds to hold QEMU's monitor open after `quit`
+DISPLAY_WAIT = 15       # seconds for display_wait to answer
+HELPER_GRACE = 10       # seconds for the display helper to exit before SIGKILL
+
+
+def path_answers(path):
+    """True if `path` exists and, if it is a socket, accepts a connection: an
+    X server's socket file appears before the server listens on it."""
+    import stat
+    try:
+        if not stat.S_ISSOCK(os.stat(path).st_mode):
+            return True
+    except OSError:
+        return False
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.settimeout(1)
+        s.connect(path)
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
 
 
 def log(msg):
@@ -142,6 +170,7 @@ class Supervisor:
         self.boot_deadline = None
         self.exiting = False                # the emulator has been told to exit
         self.command_halted = False         # a stop_command with no halted pattern exited 0
+        self.helper = None                  # the display_command process
 
     # --- state -----------------------------------------------------------
     def set_state(self, state, **extra):
@@ -186,7 +215,8 @@ class Supervisor:
                     pass
 
     def note(self, text):
-        """A supervisor remark, written into the console log and to clients."""
+        """A supervisor remark, written into the console log and to clients.
+        (A guest with no console has neither; its remarks go to the journal.)"""
         data = f"\r\n[emuctl] {text}\r\n".encode()
         if self.log_fh:
             self.log_fh.write(data)
@@ -426,7 +456,7 @@ class Supervisor:
             elif cfg.stop_mode == "freeze":
                 self.freeze()
             else:
-                self.proc.terminate()
+                self.proc.send_signal(getattr(signal, f"SIG{cfg.stop_signal}"))
         except Exception as exc:
             log(f"stop primitive failed: {exc}")
 
@@ -553,6 +583,61 @@ class Supervisor:
             log(f"emulator exited {rc}")
             self.set_state("crashed", exit_code=rc)
 
+    # --- display helper --------------------------------------------------
+    def start_helper(self, out):
+        """Start display_command and wait for display_wait. Returns an error
+        message, or None when the emulator may start."""
+        cfg = self.cfg
+        if not cfg.display_command:
+            return None
+        log(f"starting the display helper: {' '.join(cfg.display_command)}")
+        try:
+            self.helper = subprocess.Popen(cfg.display_command, env=dict(os.environ, **cfg.env),
+                                           cwd=cfg.workdir, stdout=out,
+                                           stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+        except OSError as exc:
+            return f"cannot start the display helper {cfg.display_command[0]}: {exc}"
+        if not cfg.display_wait:
+            return None
+        deadline = time.time() + DISPLAY_WAIT
+        while time.time() < deadline and not self.stop_requests:
+            if self.helper.poll() is not None:
+                return f"the display helper exited {self.helper.returncode} before " \
+                       f"{cfg.display_wait} answered"
+            if path_answers(cfg.display_wait):
+                return None
+            time.sleep(0.1)
+        if self.stop_requests:
+            return "stop requested while waiting for the display"
+        return f"{cfg.display_wait} did not answer within {DISPLAY_WAIT}s"
+
+    def stop_helper(self):
+        h, self.helper = self.helper, None
+        if not h or h.poll() is not None:
+            return
+        log("stopping the display helper")
+        h.terminate()
+        try:
+            h.wait(HELPER_GRACE)
+        except subprocess.TimeoutExpired:
+            h.kill()
+            h.wait()
+
+    def run_without_console(self):
+        """The main loop for a guest with no console: ready after ready_after
+        seconds, until a stop is asked for or the emulator exits."""
+        self.set_state("booting")
+        ready_at = time.time() + self.cfg.ready_after
+        while self.running():
+            if self.stop_requests:
+                self.shutdown()
+                break
+            if not self.ready and time.time() >= ready_at:
+                self.ready = True
+                self.set_state("ready", ready_at=int(time.time()))
+                log("guest is ready (the emulator has run for ready_after seconds)")
+            time.sleep(min(CONSOLE_POLL, 0.25))
+
     # --- run -------------------------------------------------------------
     def run(self):
         cfg = self.cfg
@@ -562,15 +647,17 @@ class Supervisor:
             log(f"REFUSING to start {cfg.name}: {exc}")
             return 2
 
-        ls = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            ls.bind((cfg.bind, cfg.broker))
-            ls.listen(8)
-        except OSError as exc:
-            log(f"cannot bind the broker on {cfg.bind}:{cfg.broker}: {exc}")
-            guard.release(locks)
-            return 1
+        ls = None
+        if cfg.has_console:
+            ls = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                ls.bind((cfg.bind, cfg.broker))
+                ls.listen(8)
+            except OSError as exc:
+                log(f"cannot bind the broker on {cfg.bind}:{cfg.broker}: {exc}")
+                guard.release(locks)
+                return 1
 
         self.started_at = int(time.time())
         for kind, stages in (("boot", cfg.boot_stages), ("stop", cfg.stop_stages)):
@@ -578,19 +665,42 @@ class Supervisor:
             if missing:
                 log(f"WARNING: {kind} stages use {', '.join(missing)}, which is not set")
         out = open(os.path.join(cfg.workdir, f"{cfg.name}.out"), "ab")
-        self.log_fh = open(os.path.join(cfg.workdir, "console.log"), "ab", buffering=0)
+        if cfg.has_console:
+            self.log_fh = open(os.path.join(cfg.workdir, "console.log"), "ab", buffering=0)
+        error = self.start_helper(out)
+        if error:
+            log(error)
+            self.stop_helper()
+            if ls:
+                ls.close()
+            guard.release(locks)
+            stopped = bool(self.stop_requests)
+            write_state(self.settings.run_dir, cfg.name, state="down" if stopped else "crashed",
+                        error=None if stopped else error, node=cfg.node,
+                        started_at=self.started_at)
+            return 0 if stopped else 1
         try:
             self.proc = subprocess.Popen(cfg.command, env=dict(os.environ, **cfg.env),
                                          cwd=cfg.workdir, stdout=out, stderr=subprocess.STDOUT,
                                          stdin=subprocess.DEVNULL)
         except OSError as exc:
             log(f"cannot start {cfg.command[0]}: {exc}")
+            self.stop_helper()
+            if ls:
+                ls.close()
             guard.release(locks)
             return 1
         self.set_state("starting")
-        threading.Thread(target=self.listener, args=(ls,), daemon=True).start()
+        if ls:
+            threading.Thread(target=self.listener, args=(ls,), daemon=True).start()
 
         try:
+            if not cfg.has_console:
+                self.run_without_console()
+                self.proc.wait()
+                self.finalize()
+                return 0
+
             self.up = self.open_console(cfg.console_timeout, give_up_at=1)
             if not self.up:
                 if self.stop_requests:
@@ -633,7 +743,9 @@ class Supervisor:
             return 0
         finally:
             self.done.set()
-            ls.close()
+            self.stop_helper()              # after the emulator, which draws on it
+            if ls:
+                ls.close()
             guard.release(locks)
 
 

@@ -329,9 +329,89 @@ def parse_gxemul(text):
     return hw
 
 
+# --- 86Box ----------------------------------------------------------------------
+
+# 86Box's internal names for the machines and CPUs seen so far; others show as written.
+B86_MACHINES = {"486sp3g": "ASUS PCI/I-486SP3G", "cubx": "ASUS CUBX",
+                "p54tp4xe": "ASUS P/I-P54TP4XE"}
+B86_CPUS = {"i486sx": "Intel 486SX", "i486dx": "Intel 486DX", "i486dx2": "Intel 486DX2",
+            "pentium_p54c": "Pentium (P54C)", "pentium_mmx": "Pentium MMX",
+            "celeron_mendocino": "Celeron (Mendocino)", "pentium2": "Pentium II"}
+
+
+def _ini(text):
+    """{section: {key: value}} from an INI file, last value winning."""
+    out, out_sec = {}, None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith((";", "#")):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            out_sec = out.setdefault(line[1:-1].strip(), {})
+            continue
+        if out_sec is not None and "=" in line:
+            k, v = line.split("=", 1)
+            out_sec[k.strip()] = v.strip()
+    return out
+
+
+def parse_86box(text):
+    """86Box's 86box.cfg: machine, CPU and speed, memory, hard disks, CD-ROM
+    images, network cards and the video card."""
+    hw = empty()
+    ini = _ini(text)
+    m = ini.get("Machine", {})
+    if m.get("machine"):
+        hw["machine"] = B86_MACHINES.get(m["machine"], m["machine"])
+    if m.get("cpu_family"):
+        cpu = B86_CPUS.get(m["cpu_family"], m["cpu_family"])
+        speed = m.get("cpu_speed", "")
+        if speed.isdigit() and 0 < int(speed) < 10 ** 11:
+            cpu += f", {round(int(speed) / 1e6)} MHz"
+        hw["cpu"] = cpu
+    if m.get("mem_size", "").isdigit():
+        hw["memory"] = mb(int(m["mem_size"]) // 1024)
+    disks = ini.get("Hard disks", {})
+    for key in sorted(disks):
+        mt = re.fullmatch(r"hdd_(\d+)_fn", key)
+        if not mt:
+            continue
+        n = mt.group(1)
+        params = [x.strip() for x in disks.get(f"hdd_{n}_parameters", "").split(",")]
+        model = None
+        if len(params) >= 5 and all(x.isdigit() for x in params[:3]):
+            size = round(int(params[0]) * int(params[1]) * int(params[2]) * 512 / (1024 * 1024))
+            model = f"{params[4].upper()} disk, {mb(size)}"
+        hw["disks"].append({"unit": f"hdd {int(n)}", "model": model, "file": disks[key],
+                            "kind": "disk", "readonly": False})
+    drives = ini.get("Floppy and CD-ROM drives", {})
+    for key in sorted(drives):
+        mt = re.fullmatch(r"cdrom_(\d+)_image_path", key)
+        if mt and drives[key]:
+            hw["disks"].append({"unit": f"cdrom {int(mt.group(1))}", "model": None,
+                                "file": drives[key], "kind": "cdrom", "readonly": True})
+    net = ini.get("Network", {})
+    for key in sorted(net):
+        mt = re.fullmatch(r"net_(\d+)_card", key)
+        if not mt or net[key] in ("", "none"):
+            continue
+        n = mt.group(1)
+        kind = net.get(f"net_{n}_net_type", "")
+        host = net.get(f"net_{n}_host_device") or None
+        hw["nics"].append({"unit": f"net {int(n)}", "model": net[key], "mac": None,
+                           "host_if": host if kind in ("pcap", "tap", "vde") else None})
+        if kind == "slirp":
+            hw["other"].append(f"net {int(n)}: SLiRP, user-mode NAT on the host")
+    video = ini.get("Video", {}).get("gfxcard")
+    if video:
+        hw["other"].append(f"video: {video}")
+    return hw
+
+
 # --- putting it together -------------------------------------------------------
 
-PARSERS = {"simh": parse_simh, "es40": parse_es40, "gxemul": parse_gxemul}
+PARSERS = {"simh": parse_simh, "es40": parse_es40, "gxemul": parse_gxemul,
+           "86box": parse_86box}
 MAX_BYTES = 256 * 1024          # far larger than any real emulator config
 MAX_FILES = 8
 
@@ -360,6 +440,11 @@ def config_files(cfg):
     """The files to read: `config` from the conf, else a guess from `command`."""
     if cfg.config_files:
         return cfg.config_files
+    if cfg.kind == "86box":         # 86Box -P <dir> reads <dir>/86box.cfg
+        args = cfg.command[1:]
+        d = args[args.index("-P") + 1] if "-P" in args[:-1] else "."
+        d = d if os.path.isabs(d) else os.path.join(cfg.workdir, d)
+        return [os.path.join(d, "86box.cfg")]
     suffix = CONFIG_SUFFIX.get(cfg.kind)
     if not suffix:
         return []

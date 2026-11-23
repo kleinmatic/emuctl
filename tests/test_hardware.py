@@ -112,8 +112,27 @@ def test_gxemul_cpu_and_nat():
     assert hw["nics"][0]["host_if"] is None and "network: gxemul simulated" in hw["other"]
 
 
+def test_86box():
+    hw = hardware.parse_86box(fixture("86box", "86box.cfg"))
+    assert hw["machine"] == "ASUS P/I-P54TP4XE" and hw["cpu"] == "Pentium (P54C), 200 MHz"
+    assert hw["memory"] == "128 MB"
+    assert [d["model"] for d in hw["disks"]] == ["SCSI disk, 2 GB", "IDE disk, 100 MB", None]
+    assert hw["disks"][2] == {"unit": "cdrom 1", "model": None, "file": "install.iso",
+                              "kind": "cdrom", "readonly": True}
+    assert [(n["model"], n["host_if"]) for n in hw["nics"]] == [("novell_ne2k", None),
+                                                                ("pcnetfast", "tap7")]
+    assert "net 1: SLiRP, user-mode NAT on the host" in hw["other"]
+
+
+def test_86box_config_is_found_from_minus_p(tmp_path):
+    from emuctl.config import parse_config
+    cfg = parse_config(f"name = d\nworkdir = {tmp_path}\nconsole = none\ndisks = hdd.img\n"
+                       f"command = /usr/bin/86Box -P vm -N\n")
+    assert hardware.config_files(cfg) == [str(tmp_path / "vm" / "86box.cfg")]
+
+
 @pytest.mark.parametrize("parser", [hardware.parse_simh, hardware.parse_es40,
-                                    hardware.parse_gxemul])
+                                    hardware.parse_gxemul, hardware.parse_86box])
 def test_parsers_never_raise_on_nonsense(parser):
     rng = random.Random(1)
     junk = [

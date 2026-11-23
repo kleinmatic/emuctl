@@ -73,15 +73,19 @@ def check_guest(settings, name):
             errors.append(f"display_password_file {cfg.display_password_file} does not exist")
     if cfg.stop_command and not _executable(cfg.stop_command[0]):
         errors.append(f"stop_command {cfg.stop_command[0]} is not an executable")
-    if cfg.bind not in ("127.0.0.1", "::1", "localhost"):
+    if cfg.display_command and not _executable(cfg.display_command[0]):
+        errors.append(f"display_command {cfg.display_command[0]} is not an executable")
+    if cfg.has_console and cfg.bind not in ("127.0.0.1", "::1", "localhost"):
         warnings.append(f"bind = {cfg.bind}: the broker is an unauthenticated console; "
                         f"anyone who can reach that address can type at the guest")
     if not cfg.clean_stop:
         warnings.append("no stop.<n> stages, stop_command or stop_mode = freeze: "
-                        "stopping this guest is a power cut for its OS")
+                        "stopping this guest is a power cut for its OS"
+                        if cfg.has_console else
+                        "no stop_command: stopping this guest is a power cut for its OS")
 
     if effective_state(read_state(settings.run_dir, name)) == "down":
-        for port in [cfg.broker] + cfg.serials:
+        for port in ([cfg.broker] + cfg.serials) if cfg.has_console else []:
             if not port_free(cfg.bind, port):
                 errors.append(f"port {port} on {cfg.bind} is already in use")
     for other in settings.guests():
@@ -91,7 +95,9 @@ def check_guest(settings, name):
             o = load_config(settings.conf_path(other))
         except (OSError, ConfigError):
             continue
-        clash = sorted(set([cfg.broker] + cfg.serials) & set([o.broker] + o.serials))
+        mine = set([cfg.broker] + cfg.serials) if cfg.has_console else set()
+        theirs = set([o.broker] + o.serials) if o.has_console else set()
+        clash = sorted(mine & theirs)
         wild = ("0.0.0.0", "::")
         if clash and (_addr(o.bind) == _addr(cfg.bind) or o.bind in wild or cfg.bind in wild):
             errors.append(f"port(s) {', '.join(map(str, clash))} also used by guest '{other}'")
