@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-11-22)
 
 - The web page has a Display tab for guests whose emulator has a VNC
   server (`display` in the conf). The daemon logs in with the password in
