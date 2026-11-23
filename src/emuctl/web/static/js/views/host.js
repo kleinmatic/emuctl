@@ -67,7 +67,7 @@ export function hostView(tab, store) {
       h("span", { class: "muted", text: `${host.cpus} CPUs · ${bytes(host.mem_total_bytes)} · up ${longUptime(host.uptime)}` })),
     h("div", { class: "tabs", role: "tablist" },
       [["summary", "Summary", "#/"], ["network", "Network", "#/host/network"],
-        ["tasks", "Tasks", "#/host/tasks"]].map(([id, label, href]) =>
+        ["energy", "Energy", "#/host/energy"], ["tasks", "Tasks", "#/host/tasks"]].map(([id, label, href]) =>
         h("a", { class: "tab", role: "tab", href, "aria-selected": String(tab === id), text: label }))),
     body);
 
@@ -128,6 +128,41 @@ export function hostView(tab, store) {
     ];
   }
 
+  let power = null;
+  function energy() {
+    if (!power) return [h("div", { class: "muted", text: "Loading…" })];
+    const rows = [...power.guests].sort((a, b) => (b.cpu_hours_24h - a.cpu_hours_24h) || a.name.localeCompare(b.name));
+    const now = rows.reduce((a, r) => a + (r.cpu_pct || 0), 0);
+    const today = rows.reduce((a, r) => a + r.cpu_hours_24h, 0);
+    const up = rows.filter((r) => isUp(r.state));
+    const hours = (m) => (m ? `${(m / 60).toFixed(1)} h` : "—");
+    return [
+      h("div", { class: "stats" },
+        stat("Guests use now", `${(now / 100).toFixed(2)} CPUs`, now / 100 / power.cpus,
+          `${pct(now / power.cpus)} of ${power.cpus} host CPUs`),
+        stat("Over the last day", `${today.toFixed(1)} CPU-hours`, today / (24 * power.cpus),
+          `${pct((today / 24 / power.cpus) * 100)} of the host's CPU, on average`),
+        stat("Up now", `${up.length} of ${rows.length}`, rows.length ? up.length / rows.length : 0,
+          up.length ? up.map((r) => r.name).join(" · ") : "nothing is running")),
+      h("section", { class: "card flush" }, h("h2", {}, "Guests ",
+        h("span", { class: "muted", text: "CPU is per cent of one host CPU; averages count only the time a guest was up" })),
+      h("div", { class: "scroll" }, h("table", { class: "data" },
+        h("thead", {}, h("tr", {}, h("th", { text: "Guest" }), h("th", { text: "State" }), h("th", { text: "Up for" }),
+          ["CPU now", "Hour average", "Day average", "Up in the last day", "CPU-hours, last day"].map((t) => h("th", { class: "num", text: t })))),
+        h("tbody", {}, rows.map((r) => h("tr", {},
+          h("td", {}, h("a", { href: `#/g/${encodeURIComponent(r.name)}/summary`, text: r.name })),
+          h("td", {}, stateBadge(r)), h("td", { text: isUp(r.state) ? longUptime(r.uptime) : "—" }),
+          h("td", { class: "num", text: pct(r.cpu_pct) }), h("td", { class: "num", text: pct(r.cpu_1h) }),
+          h("td", { class: "num", text: pct(r.cpu_24h) }), h("td", { class: "num", text: hours(r.up_minutes_24h) }),
+          h("td", { class: "num", text: r.cpu_hours_24h ? r.cpu_hours_24h.toFixed(2) : "—" }))))))),
+    ];
+  }
+
+  async function loadEnergy() {
+    try { power = await poll("/api/energy"); } catch (e) { /* keep the last */ }
+    if (tab === "energy") render();
+  }
+
   function tasks() {
     return [h("section", { class: "card flush" }, h("h2", {}, "Tasks ",
       h("span", { class: "muted", text: "the last 200; every one is also in the daemon's task log" })),
@@ -135,7 +170,8 @@ export function hostView(tab, store) {
   }
 
   function render() {
-    clear(body).append(...(tab === "network" ? network() : tab === "tasks" ? tasks() : summary()));
+    const views = { network, tasks, energy };
+    clear(body).append(...(views[tab] || summary)());
   }
 
   async function loadNet() {
@@ -147,12 +183,16 @@ export function hostView(tab, store) {
     try { Object.assign(host, await poll("/api/host")); } catch (e) { /* keep the last */ }
   }
 
-  const onRows = async () => { if (tab === "summary") { await refreshHost(); render(); } };
+  const onRows = async () => {
+    if (tab === "summary") { await refreshHost(); render(); }
+    if (tab === "energy") loadEnergy();
+  };
   const onTasks = () => { if (tab === "tasks") render(); };
   store.listeners.add(onRows);
   store.taskListeners.add(onTasks);
   render();
-  if (tab !== "tasks") {
+  if (tab === "energy") loadEnergy();
+  else if (tab !== "tasks") {
     loadNet();
     netTimer = setInterval(loadNet, NET_EVERY);
   }

@@ -193,6 +193,28 @@ class Sampler:
                      for i in ifnames},
         }
 
+    def energy(self):
+        """Per guest: how long it has been up and what CPU it has used, now,
+        over the hour and over the day. CPU is in percent of one host CPU;
+        averages count only the time the guest was up."""
+        with self._lock:
+            fine = {n: [p["cpu_pct"] for p in d] for n, d in self.history.items()}
+            day = {n: [p["cpu_pct"] for p in d] for n, d in self.day.items()}
+        out = []
+        for row in self.rows:
+            name = row["name"]
+            d = [v for v in day.get(name, ()) if v is not None]
+            out.append({
+                "name": name, "state": row["state"], "uptime": row.get("uptime"),
+                "cpu_pct": row.get("cpu_pct"),
+                "cpu_1h": _round(_mean(fine.get(name, ()))),
+                "cpu_24h": _round(_mean(d)),
+                "up_minutes_24h": len(d),
+                # percent of a CPU for a minute, summed: CPU-hours over the day
+                "cpu_hours_24h": round(sum(d) / 100 * MINUTE / 3600, 2),
+            })
+        return out
+
     # --- the day's history on disk ---------------------------------------------
 
     def save(self):

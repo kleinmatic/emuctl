@@ -65,6 +65,13 @@ The same as `emuctl net --json`: `bridges` (name, addresses, uplinks, and
 members with the guests behind each), `guests` (each guest's report, as
 below) and `warnings`.
 
+### `GET /api/energy` (viewer)
+
+What each guest costs in CPU: `{"cpus": 4, "guests": [...]}`, each guest
+with `name`, `state`, `uptime`, `cpu_pct` (now), `cpu_1h` and `cpu_24h`
+(averages over the time it was up in the last hour and day),
+`up_minutes_24h`, and `cpu_hours_24h`. CPU is per cent of one host CPU.
+
 ## Guests
 
 ### `GET /api/guests` (viewer)

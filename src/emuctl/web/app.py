@@ -400,6 +400,13 @@ async def host_network(request):
     return web.json_response(await cached(request.app, "host", lambda: network.host_network(s)))
 
 
+@routes.get("/api/energy")
+@needs("viewer")
+async def energy(request):
+    await current_rows(request.app)
+    return web.json_response({"cpus": os.cpu_count(), "guests": request.app[SAMPLER].energy()})
+
+
 @routes.get("/api/guests")
 @needs("viewer")
 async def guests(request):

@@ -69,7 +69,7 @@ async def test_everything_but_the_login_page_needs_a_session(client):
     assert r.status == 302 and r.headers["Location"] == "/login"
     for path in ("/api/host", "/api/host/network", "/api/guests/g1", "/api/guests/g1/log",
                  "/api/guests/g1/hardware", "/api/guests/g1/network", "/api/guests/g1/usage",
-                 "/api/guests/g1/check",
+                 "/api/guests/g1/check", "/api/guests/g1/notes", "/api/energy",
                  "/api/events", "/api/session"):
         assert (await client.get(path)).status == 401, path
     assert (await client.get("/login")).status == 200
@@ -320,6 +320,12 @@ async def test_hardware(client, settings, tmp_path):
     hw = await (await client.get("/api/guests/g1/hardware", headers=h)).json()
     assert hw["memory"] == "64 MB"
     assert hw["raw"][0]["text"] == "set cpu 64m\n"
+
+
+async def test_energy(client):
+    h = await session(client)
+    r = await (await client.get("/api/energy", headers=h)).json()
+    assert r["cpus"] >= 1 and [g["name"] for g in r["guests"]] == ["g1", "g2"]
 
 
 async def test_check(client, settings):

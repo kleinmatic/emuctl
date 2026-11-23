@@ -252,3 +252,22 @@ def test_a_damaged_history_file_is_ignored(settings, tmp_path):
         s = Sampler(settings, history_file=str(path))
         s.load()
         assert s.day == {}, text
+
+
+def test_energy(settings, tmp_path, monkeypatch):
+    add_guest(settings, tmp_path, "g1")
+    add_guest(settings, tmp_path, "g2", serial=21010, broker=2310)
+    cg = running(settings, "g1", monkeypatch, tmp_path / "cg")
+    clock = Clock()
+    clock.t = 600.0
+    s = Sampler(settings, clock=clock, wall=clock, root=str(tmp_path / "cg"))
+    usec = 5000000
+    for _ in range(13):
+        (cg / "cpu.stat").write_text(f"usage_usec {usec}\n")
+        s.tick()
+        clock.t += 5
+        usec += 2500000                          # 50 % of a CPU
+    g1, g2 = s.energy()
+    assert g1["cpu_pct"] == 50.0 and g1["cpu_1h"] == 50.0 and g1["cpu_24h"] == 50.0
+    assert g1["up_minutes_24h"] == 1 and g1["cpu_hours_24h"] == round(0.5 / 60, 2)
+    assert g2["cpu_1h"] is None and g2["cpu_hours_24h"] == 0
