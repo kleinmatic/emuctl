@@ -104,6 +104,14 @@ def test_check_reports_errors_and_warnings(settings, tmp_path):
     assert any("colour" in w for w in warnings)
 
 
+def test_check_command_must_be_a_file_and_localhost_is_127(settings, tmp_path):
+    add_guest(settings, tmp_path, extra=f"bind = localhost\nstop_command = {tmp_path}")
+    add_guest(settings, tmp_path, name="g2", broker=2300, serial=21010)
+    errors, _ = cli.check_guest(settings, "g1")
+    assert any("stop_command" in e and "not an executable" in e for e in errors)
+    assert any("also used by guest 'g2'" in e for e in errors)
+
+
 def test_check_sees_a_port_already_in_use(settings, tmp_path):
     holder = socket.socket()
     holder.bind(("127.0.0.1", 0))

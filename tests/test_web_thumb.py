@@ -31,7 +31,7 @@ def read_png(body):
     return w, h, rows
 
 
-async def serve_frame(w, h, bgrx, chatter=b""):
+async def serve_frame(w, h, bgrx, chatter=b"", name=b"test"):
     """A VNC server (3.8, no password) that answers one update request with
     `chatter` and then the whole screen in one raw rectangle."""
     async def client_(r, wr):
@@ -41,7 +41,7 @@ async def serve_frame(w, h, bgrx, chatter=b""):
         await r.readexactly(1)
         wr.write(b"\0\0\0\0")
         await r.readexactly(1)                                   # ClientInit
-        wr.write(struct.pack(">HH", w, h) + bytes(16) + struct.pack(">I", 4) + b"test")
+        wr.write(struct.pack(">HH", w, h) + bytes(16) + struct.pack(">I", len(name)) + name)
         await r.readexactly(20 + 8 + 10)                         # format, encodings, request
         wr.write(chatter + struct.pack(">BxH", 0, 1)
                  + struct.pack(">HHHHi", 0, 0, w, h, 0) + bgrx * (w * h))
@@ -73,6 +73,17 @@ async def test_a_small_screen_is_not_scaled_up():
     async with srv:
         w, h, rows = read_png(await thumb.snapshot(cfg_for(port)))
     assert (w, h) == (80, 50) and rows[0][:3] == b"\xff\x00\x00"
+
+
+async def test_long_text_is_read_past_and_too_much_refused():
+    srv, port = await serve_frame(80, 50, bytes([0, 0, 0xFF, 0]), name=b"A" * 70000)
+    async with srv:
+        w, h, rows = read_png(await thumb.snapshot(cfg_for(port)))
+    assert rows[0][:3] == b"\xff\x00\x00"                    # the stream stayed in step
+    srv, port = await serve_frame(80, 50, bytes(4), name=b"A" * (thumb.MAX_SKIP + 1))
+    async with srv:
+        with pytest.raises(RfbError, match="too much"):
+            await thumb.snapshot(cfg_for(port))
 
 
 async def test_nothing_listening():

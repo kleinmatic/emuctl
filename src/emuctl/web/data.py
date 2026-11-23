@@ -206,13 +206,13 @@ def clean_text(data):
         .decode("utf-8", "replace")
 
 
-def tail_bytes(path, limit=LOG_TAIL_BYTES, within=None):
-    """The last `limit` bytes of a regular file, or None.
+def _open_checked(path, within=None):
+    """An fd for the regular file at `path`, or None: never a protected file,
+    even through a symlink swapped while we look.
 
-    With `within`, the file must really be inside that directory: the last
-    part of the path may not be a symlink, and the file opened must be the
-    one the checks looked at.
-    """
+    With `within`, the file must really be inside that directory and the last
+    part of the path may not be a symlink. The file opened must be the one
+    the checks looked at."""
     real = os.path.realpath(path)
     if not safe_path(path) or (within and not _inside(real, within)):
         return None
@@ -222,23 +222,34 @@ def tail_bytes(path, limit=LOG_TAIL_BYTES, within=None):
         return None
     try:
         st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode):
-            return None
-        try:
-            again = os.stat(real)
-        except OSError:
-            return None
-        if (st.st_dev, st.st_ino) != (again.st_dev, again.st_ino):
-            return None                         # swapped between the check and the open
-        os.lseek(fd, max(0, st.st_size - limit), os.SEEK_SET)
-        chunks, left = [], limit
-        while left > 0:
-            b = os.read(fd, min(65536, left))
-            if not b:
-                break
-            chunks.append(b)
-            left -= len(b)
-        return b"".join(chunks)
+        again = os.stat(real)
+        if stat.S_ISREG(st.st_mode) and (st.st_dev, st.st_ino) == (again.st_dev, again.st_ino):
+            return fd
+    except OSError:
+        pass
+    os.close(fd)                                # not a file, or swapped while we looked
+    return None
+
+
+def _read_up_to(fd, limit):
+    chunks, left = [], limit
+    while left > 0:
+        b = os.read(fd, min(65536, left))
+        if not b:
+            break
+        chunks.append(b)
+        left -= len(b)
+    return b"".join(chunks)
+
+
+def tail_bytes(path, limit=LOG_TAIL_BYTES, within=None):
+    """The last `limit` bytes of a regular file, or None (see _open_checked)."""
+    fd = _open_checked(path, within)
+    if fd is None:
+        return None
+    try:
+        os.lseek(fd, max(0, os.fstat(fd).st_size - limit), os.SEEK_SET)
+        return _read_up_to(fd, limit)
     finally:
         os.close(fd)
 
@@ -248,16 +259,11 @@ NOTES_MAX = 256 * 1024
 
 def read_notes(cfg):
     """{"text", "truncated"} from the guest's notes file, or None if there is none to show."""
-    if not cfg.notes or not safe_path(cfg.notes):
+    fd = _open_checked(cfg.notes) if cfg.notes else None
+    if fd is None:
         return None
     try:
-        fd = os.open(cfg.notes, os.O_RDONLY | os.O_NONBLOCK)
-    except OSError:
-        return None
-    try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            return None
-        data = os.read(fd, NOTES_MAX + 1)
+        data = _read_up_to(fd, NOTES_MAX + 1)
     finally:
         os.close(fd)
     return {"text": data[:NOTES_MAX].decode("utf-8", "replace"),

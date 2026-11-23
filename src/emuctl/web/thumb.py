@@ -23,6 +23,18 @@ FRAME_TIMEOUT = 15
 PIXEL_FORMAT = struct.pack(">BBBBHHHBBBxxx", 32, 24, 0, 1, 255, 255, 255, 16, 8, 0)
 
 
+MAX_SKIP = 1 << 20          # the most text (desktop name, clipboard) read past
+
+
+async def skip(reader, n):
+    """Read past n bytes the thumbnail does not need, all of them, so the
+    stream stays in step; refuse more than MAX_SKIP."""
+    if n > MAX_SKIP:
+        raise RfbError(f"the display sent {n} bytes of text; too much for a thumbnail")
+    while n:
+        n -= len(await reader.readexactly(min(n, 65536)))
+
+
 async def grab(reader, writer):
     """(width, height, BGRX bytes) of one full frame, after login()."""
     writer.write(b"\x01")                                   # ClientInit, shared
@@ -30,7 +42,7 @@ async def grab(reader, writer):
     w, h = struct.unpack(">HH", await reader.readexactly(4))
     await reader.readexactly(16)                            # the server's pixel format
     (n,) = struct.unpack(">I", await reader.readexactly(4))
-    await reader.readexactly(min(n, 1 << 16))               # its desktop name
+    await skip(reader, n)                                   # its desktop name
     if not 0 < w * h <= MAX_PIXELS:
         raise RfbError(f"the screen is {w} x {h}; too big for a thumbnail")
     writer.write(b"\x00\x00\x00\x00" + PIXEL_FORMAT          # SetPixelFormat
@@ -60,7 +72,7 @@ async def grab(reader, writer):
             continue
         elif kind == 3:                                     # ServerCutText
             _, n = struct.unpack(">3sI", await reader.readexactly(7))
-            await reader.readexactly(min(n, 1 << 20))
+            await skip(reader, n)
         else:
             raise RfbError(f"the display sent message type {kind}")
 
