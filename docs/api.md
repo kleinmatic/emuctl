@@ -58,7 +58,7 @@ state, 1 for the current one), `emuctl_guest_locked`,
   scheme: https
   tls_config: {insecure_skip_verify: true}    # or ca_file, with a real certificate
   authorization: {credentials_file: /etc/prometheus/emuctl-token}
-  static_configs: [{targets: ["starry.local:8600"]}]
+  static_configs: [{targets: ["retrohost.local:8600"]}]
 ```
 
 ## Logging in
