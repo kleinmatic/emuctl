@@ -19,8 +19,11 @@ comments on their own line there.
 | `broker` | TCP port where emuctl re-serves the console. |
 | `ready` | Regular expression that means the guest finished booting, usually its login prompt. |
 
-A guest with no serial console (86Box) sets `console = none` and leaves out
+A guest with no serial console sets `console = none` and leaves out
 `serials`, `broker` and `ready`; see [below](#guests-with-no-serial-console).
+An emulator that reaches its serial port through a terminal device rather
+than a TCP port (86Box) sets `console = pty` and leaves out `serials`; see
+[below](#a-console-on-a-pseudo-terminal).
 
 ## Boot
 
@@ -87,14 +90,24 @@ whatever the service manager provides (for example a systemd
 
 Unknown keys are ignored, and `emuctl check` lists them.
 
-## Guests with no serial console
+## A console on a pseudo-terminal
+
+`console = pty` is for an emulator that can attach its serial port to a
+terminal device but not to a TCP port, such as 86Box's "Serial Passthrough
+(COM)". The supervisor makes a pseudo-terminal before it starts the
+emulator, and publishes the emulator's end as `<run_dir>/<name>.tty` (with
+the default `run_dir`, `/run/emuctl/<name>.tty`); point the emulator at that
+path. The supervisor holds the other end as the console, so everything else
+is as for a TCP console: `broker`, `ready`, `halted`, stages, the console log,
+`emuctl console` and the web page's Console tab. `serials` is not used.
+
 
 Some emulators have only a screen: 86Box draws a PC's display and has no
 serial console emuctl can hold. Such a guest says so:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `console` | `serial` | `none` for a guest with no serial console. Then `serials`, `broker` and `ready` are not needed, and stages, `halted`, `stop_wake`, `console_timeout`, `bind` and `stop_mode = freeze` are refused, since each needs a console. `emuctl console` says there is none; the web page shows no Console tab. |
+| `console` | `serial` | `serial` (TCP ports), `pty` ([above](#a-console-on-a-pseudo-terminal)), or `none` for a guest with no serial console. Then `serials`, `broker` and `ready` are not needed, and stages, `halted`, `stop_wake`, `console_timeout`, `bind` and `stop_mode = freeze` are refused, since each needs a console. `emuctl console` says there is none; the web page shows no Console tab. |
 | `ready_after` | 10 | Seconds after the emulator starts before the guest counts as `ready`. With `guest_addr`, a guest that does not answer there is still `degraded`. |
 | `display_command` | none | A helper the supervisor starts before the emulator and stops after it, such as the `Xvnc` server 86Box draws on. Split like `command`; it gets the guest's `env`. Any guest may use it. |
 | `display_wait` | none | An absolute path that must exist before the emulator starts, for example the X server's socket `/tmp/.X11-unix/X1`. If it is a socket, it must also accept a connection: an X server makes the file before it listens. The start fails if it does not answer within 15 seconds. Needs `display_command`. |

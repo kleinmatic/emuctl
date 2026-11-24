@@ -14,7 +14,7 @@ REQUIRED = ("name", "workdir", "command", "disks", "serials", "broker", "ready")
 CONSOLE_KEYS = ("serials", "broker", "ready")
 # Keys that only mean something with a serial console.
 NEEDS_CONSOLE = ("halted", "stop_wake", "console_timeout", "bind")
-CONSOLES = ("serial", "none")
+CONSOLES = ("serial", "pty", "none")
 STOP_SIGNALS = ("TERM", "HUP", "INT", "QUIT")
 VALID_STOP_MODES = ("signal", "freeze", "monitor")
 # Keys whose value may contain '#', so an inline comment cannot be stripped.
@@ -116,6 +116,10 @@ class GuestConfig:
     def has_console(self):
         return self.console != "none"
 
+    def pty_path(self, run_dir):
+        """console = pty: where the emulator finds its end of the console."""
+        return os.path.join(run_dir, f"{self.name}.tty")
+
     @property
     def clean_stop(self):
         """True if a stop does more than cut the guest's power."""
@@ -198,8 +202,12 @@ def parse_config(text):
     if console not in CONSOLES:
         raise ConfigError(f"console must be one of {CONSOLES}, got {console!r}")
     for key in REQUIRED:
-        if key not in kv and not (console == "none" and key in CONSOLE_KEYS):
+        if key not in kv and not (console == "none" and key in CONSOLE_KEYS) \
+                and not (console == "pty" and key == "serials"):
             raise ConfigError(f"missing required key: {key}")
+    if console == "pty" and "serials" in kv:
+        raise ConfigError("console = pty: the console is a pseudo-terminal emuctl makes; "
+                          "remove serials")
     if console == "none":
         used = [k for k in kv if k in CONSOLE_KEYS + NEEDS_CONSOLE
                 or k.startswith(STAGED)]
@@ -231,6 +239,8 @@ def parse_config(text):
         broker = _int(kv, "broker", None)
         if broker in serials:
             raise ConfigError("broker port collides with a serial port")
+    elif console == "pty":
+        broker = _int(kv, "broker", None)
 
     env = {}
     for pair in kv.get("env", "").split():
@@ -323,7 +333,7 @@ def parse_config(text):
         disks=disks, serials=serials, broker=broker,
         bind=kv.get("bind", "127.0.0.1"),
         boot_stages=_stages(kv, "boot."),
-        ready=_regex("ready", kv["ready"]) if console == "serial" else "",
+        ready=_regex("ready", kv["ready"]) if console != "none" else "",
         halted=_regex("halted", halted) if halted else None,
         stuck=[_regex(k, v) for k, v in _family(kv, "stuck.")],
         boot_timeout=_int(kv, "boot_timeout", 900),

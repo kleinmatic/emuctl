@@ -17,6 +17,10 @@
   of the window, instead of a fixed box with black bars.
 - `emuctl check` reports a `display_ca` that is missing or that the
   checking account cannot read.
+- `console = pty`: the supervisor makes a pseudo-terminal, publishes the
+  emulator's end as `<run_dir>/<name>.tty`, and uses the other end as the
+  console. For 86Box's "Serial Passthrough (COM)", so an 86Box guest with a
+  serial console gets stages, a broker and the Console tab.
 - `kind = 86box`, guessed from the program name: the Hardware tab and
   `emuctl info --hardware` read the machine's `86box.cfg`. A docs page for
   86Box and an example conf.

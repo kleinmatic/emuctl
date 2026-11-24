@@ -127,6 +127,9 @@ def format_info(settings, name, probe=probe_guest):
     line("disks", ", ".join(cfg.disks) or "none (diskless)")
     if cfg.has_console:
         line("console", f"emuctl console {cfg.name}   (broker {cfg.bind}:{cfg.broker}, shared)")
+    if cfg.console == "pty":
+        line("pty", f"{cfg.pty_path(settings.run_dir)}   (the emulator's end of the console)")
+    elif cfg.has_console:
         line("serials", ", ".join(str(p) for p in cfg.serials)
              + "   (held by the supervisor; do not connect)")
     else:

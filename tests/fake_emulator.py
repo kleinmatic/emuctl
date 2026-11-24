@@ -23,7 +23,9 @@ import time
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--serial", type=int, action="append", required=True)
+    ap.add_argument("--serial", type=int, action="append", default=[])
+    ap.add_argument("--pty", help="use this terminal as the console, not a TCP port "
+                                  "(86Box's host serial passthrough)")
     ap.add_argument("--disk", action="append", default=[], help="file to hold open")
     ap.add_argument("--stuck", help="print this instead of reaching login")
     ap.add_argument("--self-boot", action="store_true", help="do not wait for `boot`")
@@ -39,6 +41,8 @@ def main():
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     held = [open(d, "r+b") for d in args.disk]     # noqa: F841 -- kept open on purpose
 
+    if args.pty:
+        return run_on(PtyConn(args.pty), args, [], time.time())
     listeners = []
     for port in args.serial:
         ls = socket.socket()
@@ -48,8 +52,35 @@ def main():
         listeners.append(ls)
     # Like es40 before 0.95: nothing happens until every serial has a client.
     conns = [ls.accept()[0] for ls in listeners]
-    con = conns[0]
-    started = time.time()
+    run_on(conns[0], args, listeners, time.time())
+
+
+class PtyConn:
+    """A terminal device with the socket calls run_on() makes."""
+
+    def __init__(self, path):
+        import tty
+        self.fd = os.open(path, os.O_RDWR | os.O_NOCTTY)
+        tty.setraw(self.fd)
+        self.timeout = None
+
+    def settimeout(self, t):
+        self.timeout = t
+
+    def sendall(self, data):
+        os.write(self.fd, data)
+
+    def recv(self, n):
+        import select
+        if not select.select([self.fd], [], [], self.timeout)[0]:
+            raise socket.timeout()
+        return os.read(self.fd, n)
+
+    def close(self):
+        os.close(self.fd)
+
+
+def run_on(con, args, listeners, started):
 
     def say(text):
         con.sendall(text.encode())

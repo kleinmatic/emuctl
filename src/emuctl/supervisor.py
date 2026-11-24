@@ -41,6 +41,58 @@ DISPLAY_WAIT = 15       # seconds for display_wait to answer
 HELPER_GRACE = 10       # seconds for the display helper to exit before SIGKILL
 
 
+class PtyConsole:
+    """The supervisor's end of a pseudo-terminal, used as the console in
+    place of a TCP connection (`console = pty`). It answers the calls pump()
+    and the rest make on a console socket. The supervisor keeps the other end
+    open too, so the emulator closing and reopening its end loses nothing."""
+
+    def __init__(self, path):
+        import tty
+        self.master, self.slave = os.openpty()
+        tty.setraw(self.slave)
+        self.path = path
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        os.symlink(os.ttyname(self.slave), path)
+        self.timeout = CONSOLE_POLL
+
+    def settimeout(self, t):
+        self.timeout = t
+
+    def recv(self, n):
+        import select
+        ready, _, _ = select.select([self.master], [], [], self.timeout)
+        if not ready:
+            raise socket.timeout()
+        try:
+            return os.read(self.master, n)
+        except OSError:
+            return b""
+
+    def sendall(self, data):
+        view = memoryview(data)
+        while view:
+            view = view[os.write(self.master, view):]
+
+    def close(self):
+        """Does nothing: the console lives as long as the supervisor."""
+
+    def destroy(self):
+        for fd in (self.master, self.slave):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            if os.path.islink(self.path):
+                os.unlink(self.path)
+        except OSError:
+            pass
+
+
 def path_answers(path):
     """True if `path` exists and, if it is a socket, accepts a connection: an
     X server's socket file appears before the server listens on it."""
@@ -171,6 +223,7 @@ class Supervisor:
         self.exiting = False                # the emulator has been told to exit
         self.command_halted = False         # a stop_command with no halted pattern exited 0
         self.helper = None                  # the display_command process
+        self.pty = None                     # console = pty: the PtyConsole
 
     # --- state -----------------------------------------------------------
     def set_state(self, state, **extra):
@@ -298,7 +351,9 @@ class Supervisor:
     # --- console ---------------------------------------------------------
     def open_console(self, seconds, give_up_at=2):
         """Connect to the console serial; None if it does not answer in time
-        or `give_up_at` stop requests have arrived."""
+        or `give_up_at` stop requests have arrived. A pty console is always there."""
+        if self.pty:
+            return self.pty
         deadline = time.time() + seconds
         while (time.time() < deadline and self.running()
                and self.stop_requests < give_up_at):
@@ -693,6 +748,14 @@ class Supervisor:
                         started_at=self.started_at)
             return 0 if stopped else 1
         try:
+            if cfg.console == "pty":
+                try:
+                    self.pty = PtyConsole(cfg.pty_path(self.settings.run_dir))
+                except OSError as exc:
+                    log(f"cannot make the console pseudo-terminal: {exc}")
+                    return 1
+                log(f"console: pseudo-terminal {os.ttyname(self.pty.slave)}, "
+                    f"published as {self.pty.path}")
             try:
                 self.proc = subprocess.Popen(cfg.command, env=dict(os.environ, **cfg.env),
                                              cwd=cfg.workdir, stdout=out,
@@ -723,7 +786,8 @@ class Supervisor:
                     self.set_state("down", exit_code=self.proc.returncode)
                     return 0
                 if self.running():
-                    log(f"console on {cfg.bind}:{cfg.serials[0]} never answered; "
+                    log(f"console on {cfg.bind}:{cfg.serials[0] if cfg.serials else '?'} never "
+                        f"answered; "
                         f"stopping the emulator")
                     self.proc.kill()
                 self.proc.wait()
@@ -756,6 +820,8 @@ class Supervisor:
             # running (a supervisor fault must not become a power cut).
             if self.proc is None or self.proc.poll() is not None:
                 self.stop_helper()
+                if self.pty:
+                    self.pty.destroy()
             if ls:
                 ls.close()
             guard.release(locks)

@@ -4,13 +4,33 @@ These notes come from five guests (MS-DOS 6.22, AT&T SVR4, UnixWare 2,
 Windows NT 4 and Solaris 8 x86) on 86Box 6.0, built from upstream's own
 `debian/` directory on Debian 13. Debian does not package 86Box.
 
-## No serial console
+## Console: a serial port on a pseudo-terminal, or none
 
-86Box emulates a PC with a screen and keyboard. It has no serial console
-emuctl can hold, so a guest says `console = none`: no `serials`, `broker`,
-`ready` or stages. It counts as `ready` once 86Box has run for
-`ready_after` seconds; set `guest_addr` if the guest has a network address
-that answers, so a hung guest shows as `degraded`.
+86Box emulates a PC with a screen and keyboard. If the guest OS also has a
+console or a login on COM1 (Solaris and UnixWare can), give 86Box's COM1 to
+emuctl: set `console = pty` in the guest's conf, and in `86box.cfg`, with the
+guest stopped:
+
+```
+[Ports (COM & LPT)]
+serial1_device = serial_passthrough
+
+[Serial Passthrough (COM) #1]
+path = /run/emuctl/<guest>.tty
+```
+
+emuctl makes that pseudo-terminal before it starts 86Box and holds the other
+end, so the guest gets a broker, `ready` and `halted` patterns, stages for a
+clean shutdown, and the web page's Console tab. Do not use 86Box's "Virtual
+Console" (`serial1_device = stdio`) instead: in its pseudo-terminal mode it
+stops the machine at a dialog naming the new terminal on every start, and the
+name changes each time.
+
+A guest with nothing on its serial port (DOS, Windows NT) says
+`console = none`: no `serials`, `broker`, `ready` or stages. It counts as
+`ready` once 86Box has run for `ready_after` seconds; set `guest_addr` if the
+guest has a network address that answers, so a hung guest shows as
+`degraded`.
 
 ## A screen on a headless host
 
