@@ -11,6 +11,8 @@
 - The Display tab and thumbnails can log in to a VNC server that uses
   TigerVNC's VeNCrypt X509Vnc (`display_auth = x509vnc`, with `display_ca`
   naming the certificate to trust), as 86Box guests' Xvnc servers do.
+- The Console and Display tabs connect by themselves when the guest comes
+  up, from the page or anywhere else, without pressing Reconnect.
 - The Display tab takes the shape of the guest's screen, up to the height
   of the window, instead of a fixed box with black bars.
 - `emuctl check` reports a `display_ca` that is missing or that the

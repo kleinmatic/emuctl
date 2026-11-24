@@ -8,6 +8,7 @@ import { FitAddon } from "../../vendor/xterm/addon-fit.mjs";
 import { Terminal } from "../../vendor/xterm/xterm.mjs";
 import { get, guestPath } from "../api.js";
 import { h, overlay } from "../dom.js";
+import { isUp } from "../format.js";
 import { slowSend } from "../keys.js";
 import { COLS, LOOKS, PHOSPHORS, ROWS, fontFor, storeLook, storedLook, xtermTheme } from "../phosphor.js";
 
@@ -153,12 +154,30 @@ export function consoleView(name, store) {
       for (const b of [...keyBtns, pasteBtn]) b.disabled = true;
       if (!bannerText.textContent.includes("not running")) {
         bannerText.textContent = "Disconnected.";
-        cover("Disconnected. Press Reconnect.");
+        cover("Disconnected. Reconnecting when the guest is up…");
       }
       takeBtn.classList.add("hidden");
       reconnectBtn.classList.remove("hidden");
     };
   }
+
+  // When the guest comes up (started from this page, the command line or
+  // anywhere), connect without waiting for Reconnect. The page's guest list
+  // updates every 5 seconds; each update while the guest is up and the console
+  // is not connected is one try, up to MAX_TRIES per change of state.
+  const MAX_TRIES = 12;
+  let tries = 0;
+  let lastState = null;
+  const onRows = () => {
+    const row = store.row(name);
+    if (closed || !row) return;
+    if (row.state !== lastState) { lastState = row.state; tries = 0; }
+    if (isUp(row.state) && (!ws || ws.readyState === WebSocket.CLOSED) && tries < MAX_TRIES) {
+      tries += 1;
+      connect();
+    }
+  };
+  store.listeners.add(onRows);
 
   async function download() {
     const r = await get(guestPath(name, "/log?source=console&lines=5000"));
@@ -227,6 +246,7 @@ export function consoleView(name, store) {
     el,
     close() {
       closed = true;
+      store.listeners.delete(onRows);
       if (pasting) pasting.cancel();
       window.removeEventListener("resize", onResize);
       if (ws) ws.close();

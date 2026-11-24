@@ -63,8 +63,9 @@ export function displayView(name, store) {
     if (veil) { veil.remove(); veil = null; }
   }
 
+  let connecting = false;
   async function connect() {
-    if (closed) return;
+    if (closed || connecting) return;
     if (rfb) { rfb.disconnect(); rfb = null; }
     const row = store.row(name);
     if (row && !isUp(row.state)) {
@@ -76,7 +77,10 @@ export function displayView(name, store) {
     uncover();
     reconnect.classList.add("hidden");
     status.textContent = "Connecting…";
-    if (!RFB) RFB = (await import("../../vendor/novnc/core/rfb.js")).default;
+    connecting = true;
+    try {
+      if (!RFB) RFB = (await import("../../vendor/novnc/core/rfb.js")).default;
+    } finally { connecting = false; }
     if (closed) return;
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     rfb = new RFB(screen, `${proto}//${location.host}${guestPath(name, "/display")}`,
@@ -104,10 +108,19 @@ export function displayView(name, store) {
   }
 
   scaleBox.addEventListener("change", () => { if (rfb) rfb.scaleViewport = scaleBox.checked; });
+  // When the guest comes up, connect without waiting for Reconnect: one try
+  // per 5-second update while it is up and the screen is not connected, up to
+  // MAX_TRIES per change of state (a display that never answers stops trying).
+  const MAX_TRIES = 12;
+  let tries = 0;
+  let lastState = null;
   const onRows = () => {
     const row = store.row(name);
-    if (!rfb && row && isUp(row.state) && veil && !reconnect.classList.contains("hidden")) {
-      status.textContent = `${name} is ${row.state}; press Reconnect when its screen is up.`;
+    if (closed || !row) return;
+    if (row.state !== lastState) { lastState = row.state; tries = 0; }
+    if (!rfb && isUp(row.state) && tries < MAX_TRIES) {
+      tries += 1;
+      connect();
     }
   };
   store.listeners.add(onRows);

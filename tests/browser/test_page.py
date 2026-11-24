@@ -221,6 +221,20 @@ def test_console_types_at_the_guest(page, devhost_daemon):
     page.wait_for_selector(".console-banner:has-text('Viewing')")
 
 
+def test_the_console_connects_by_itself_when_the_guest_starts(page, devhost_daemon):
+    base, password = devhost_daemon
+    page.goto(base + "/")
+    page.fill("input[name=user]", "dev")
+    page.fill("input[name=password]", password)
+    page.click("button[type=submit]")
+    page.wait_for_selector("table.data")
+    page.goto(base + "/#/g/vax/console")
+    page.wait_for_selector(".console-banner:has-text('not running')", timeout=10000)
+    page.click(".titlebar button:has-text('Start')")       # no Reconnect pressed
+    page.wait_for_selector(".xterm-rows:has-text('login:')", timeout=40000)
+    assert page.locator(".screen-overlay").count() == 0
+
+
 def test_display_tab_and_pop_out(page, devhost_daemon, tmp_path):
     """noVNC under the page's CSP, against a fake VNC server; then Pop out."""
     base, password = devhost_daemon
