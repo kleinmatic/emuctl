@@ -251,6 +251,12 @@ def test_display_tab_and_pop_out(page, devhost_daemon, tmp_path):
             if (!c || !c.width) return false;
             const d = c.getContext('2d').getImageData(10, 10, 1, 1).data;
             return d[0] > 150 && d[1] > 60 && d[1] < 140 && d[2] < 80; }""", timeout=10000)
+        # The box takes the remote screen's shape (160 x 100 here).
+        page.wait_for_function("""() => {
+            const b = document.querySelector('.display-box');
+            const room = Math.max(240, window.innerHeight - 290);
+            return Math.abs(b.clientHeight - Math.min(room, b.clientWidth * 100 / 160)) <= 2;
+            }""", timeout=5000)
         with page.context.expect_page() as info:
             page.click(".display button:has-text('Pop out')")
         pop = info.value

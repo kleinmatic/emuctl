@@ -31,6 +31,28 @@ export function displayView(name, store) {
   let veil = null;
   let closed = false;
 
+  // The box takes the remote screen's shape: as wide as there is room for,
+  // and as tall as that width calls for, up to the height of the window.
+  // noVNC sizes its canvas to the remote framebuffer, so watch that.
+  let fb = null;                    // [width, height] of the remote screen
+  function fitBox() {
+    if (!fb || document.fullscreenElement === box) return;
+    const pop = document.body.classList.contains("popout");
+    const room = Math.max(240, window.innerHeight - (pop ? 110 : 290));
+    const want = Math.round(box.clientWidth * fb[1] / fb[0]);
+    box.style.height = `${Math.min(room, want)}px`;
+  }
+  const canvasWatch = new MutationObserver(() => {
+    const c = screen.querySelector("canvas");
+    if (c && c.width && c.height && (!fb || fb[0] !== c.width || fb[1] !== c.height)) {
+      fb = [c.width, c.height];
+      fitBox();
+    }
+  });
+  canvasWatch.observe(screen, { subtree: true, childList: true, attributes: true,
+    attributeFilter: ["width", "height"] });
+  window.addEventListener("resize", fitBox);
+
   function cover(text) {
     if (veil) veil.remove();
     veil = overlay(text);
@@ -94,6 +116,8 @@ export function displayView(name, store) {
     el,
     close() {
       closed = true;
+      canvasWatch.disconnect();
+      window.removeEventListener("resize", fitBox);
       store.listeners.delete(onRows);
       if (rfb) rfb.disconnect();
     },

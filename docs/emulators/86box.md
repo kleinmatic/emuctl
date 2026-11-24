@@ -58,9 +58,15 @@ do. For those, a `stop_command` that shuts the guest down over its network
   Display tab; it remembers.
 - **The process is called `qt_thread`,** not `86Box`, so `pkill -x 86Box`
   misses it. emuctl and systemd track it by pid and cgroup.
-- **Size the display for the guest's modes plus 86Box's menu and status
-  bars.** DOS text is 720 by 473 and 640 by 480 graphics about 640 by 553, so
-  `-geometry 720x560` suits a DOS guest.
+- **Turn off "Resizable window"** (`vid_resize = 0` in `86box.cfg`, or
+  View → Resizable window). With no window manager in Xvnc, a resizable
+  window opens small in the corner and squeezes the guest into it. Fixed, the
+  window is exactly the guest's screen and follows its video mode. Edit
+  `86box.cfg` only while the guest is stopped: 86Box rewrites it on exit.
+- **Size Xvnc for the guest's screen plus 86Box's menu, toolbar and status
+  bar, 73 pixels in all (6.0, Qt).** A 1024 by 768 desktop needs
+  `-geometry 1024x841`. For DOS, text is 720 by 400 and 640 by 480 graphics
+  is common, so `-geometry 720x560` covers both.
 
 ## Example
 
