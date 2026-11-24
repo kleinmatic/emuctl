@@ -1,7 +1,7 @@
 """emuctl: run emulated machines as services."""
 import os
 
-__version__ = "0.6.0"
+__version__ = "0.7.0.dev0"
 
 
 def full_version(here=None):
