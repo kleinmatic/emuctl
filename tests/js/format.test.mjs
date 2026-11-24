@@ -98,3 +98,10 @@ test("a way into a guest, as a command", () => {
   assert.equal(f.reachCommand({ host: null, port: 2223, service: "ssh" }, "starry"), "ssh -p 2223 starry");
   assert.equal(f.reachCommand({ host: "192.0.2.10", port: 80, service: null }, "h"), "192.0.2.10:80");
 });
+
+test("sorting guest rows, with missing values last", () => {
+  const rows = [{ n: "a", c: 5 }, { n: "b", c: null }, { n: "c", c: 50 }, { n: "d", c: 5 }];
+  const names = (rs) => rs.map((r) => r.n).join("");
+  assert.equal(names(f.sortRows(rows, (r) => r.c, "desc")), "cadb");
+  assert.equal(names(f.sortRows(rows, (r) => r.c, "asc")), "adcb");
+});

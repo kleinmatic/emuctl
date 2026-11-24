@@ -206,6 +206,23 @@ def test_start_shutdown_start_stop_now(page, devhost_daemon):
     assert "power cut" in page.locator("dialog.dialog.wide").inner_text()
 
 
+def test_the_guest_table_sorts_by_a_column(page, devhost_daemon):
+    base, password = devhost_daemon
+    page.goto(base + "/")
+    page.fill("input[name=user]", "dev")
+    page.fill("input[name=password]", password)
+    page.click("button[type=submit]")
+    page.wait_for_selector("table.data")
+    first = lambda: page.locator("table.data tbody tr td:first-child").first.inner_text()  # noqa: E731
+    assert first() == "alpha"                                   # by guest name, A to Z
+    page.click("table.data th button:has-text('Guest')")
+    page.wait_for_function("document.querySelector('table.data tbody td').innerText === 'vax'")
+    page.click("table.data th button:has-text('CPU')")          # numbers: biggest first
+    assert page.locator("table.data th[aria-sort='descending']").inner_text().startswith("CPU")
+    page.click("table.data th button:has-text('CPU')")
+    assert page.locator("table.data th[aria-sort='ascending']").inner_text().startswith("CPU")
+
+
 def test_refused_start_says_why(page, devhost_daemon):
     base, password = devhost_daemon
     page.goto(base + "/")

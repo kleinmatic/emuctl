@@ -2,7 +2,7 @@
 // The host: summary cards, every guest, the bridges and the warnings.
 import { get, poll } from "../api.js";
 import { clear, h } from "../dom.js";
-import { bytes, isUp, longUptime, pct, stateClass, uptime } from "../format.js";
+import { bytes, isUp, longUptime, pct, sortRows, stateClass, uptime } from "../format.js";
 import { taskTable } from "./tasks.js";
 
 const NET_EVERY = 30000;      // the network report runs ip, bridge and ethtool; not every tick
@@ -57,9 +57,31 @@ export function warningList(warnings) {
   return h("ul", { class: "warnings" }, warnings.map((w) => h("li", {}, h("span", { text: w }))));
 }
 
+// The guest table's columns: label, value to sort by, numeric (first click
+// sorts biggest first), extra class.
+const COLUMNS = [
+  ["Guest", (r) => r.name.toLowerCase(), false, ""],
+  ["OS", (r) => (r.os || "").toLowerCase() || null, false, "wide-only"],
+  ["Emulator", (r) => (r.emulator || "").toLowerCase() || null, false, "wide-only"],
+  ["State", (r) => r.state, false, ""],
+  ["Uptime", (r) => r.uptime, true, ""],
+  ["CPU", (r) => r.cpu_pct, true, "num"],
+  ["Memory", (r) => r.mem_bytes, true, "num"],
+];
+const SORT_KEY = "emuctl-guest-sort";
+
+function storedSort() {
+  try {
+    const v = JSON.parse(localStorage.getItem(SORT_KEY));
+    if (v && COLUMNS.some(([label]) => label === v.col) && ["asc", "desc"].includes(v.dir)) return v;
+  } catch (e) { /* none, then */ }
+  return { col: "Guest", dir: "asc" };
+}
+
 export function hostView(tab, store) {
   let net = null;
   let netTimer = null;
+  let sort = storedSort();
   const body = h("div", { class: "content" });
   const host = store.host;
   const el = h("div", {},
@@ -89,11 +111,22 @@ export function hostView(tab, store) {
         odd.length ? odd.map((r) => `${r.name} ${r.state}`).join(" · ") : "nothing needs attention"),
     ];
     const links = guestLinks(net);
+    const column = COLUMNS.find(([label]) => label === sort.col) || COLUMNS[0];
+    const sorted = sortRows(rows, column[1], sort.dir);
+    const head = COLUMNS.map(([label, , numeric, cls]) => {
+      const on = sort.col === label;
+      return h("th", { class: `${cls} sortable`.trim(),
+        "aria-sort": on ? (sort.dir === "asc" ? "ascending" : "descending") : "none" },
+      h("button", { type: "button", class: "sort", onclick: () => {
+        sort = on ? { col: label, dir: sort.dir === "asc" ? "desc" : "asc" }
+          : { col: label, dir: numeric ? "desc" : "asc" };
+        try { localStorage.setItem(SORT_KEY, JSON.stringify(sort)); } catch (e) { /* fine */ }
+        render();
+      } }, label, on ? h("span", { class: "arrow", text: sort.dir === "asc" ? " ▲" : " ▼" }) : null));
+    });
     const table = h("table", { class: "data" },
-      h("thead", {}, h("tr", {}, h("th", { text: "Guest" }), h("th", { class: "wide-only", text: "OS" }),
-        h("th", { class: "wide-only", text: "Emulator" }), h("th", { text: "State" }), h("th", { text: "Uptime" }),
-        h("th", { class: "num", text: "CPU" }), h("th", { class: "num", text: "Memory" }), h("th", { text: "Network" }))),
-      h("tbody", {}, rows.map((r) => h("tr", {},
+      h("thead", {}, h("tr", {}, head, h("th", { text: "Network" }))),
+      h("tbody", {}, sorted.map((r) => h("tr", {},
         h("td", {}, h("a", { href: `#/g/${encodeURIComponent(r.name)}/summary`, text: r.name })),
         h("td", { class: "wide-only", text: r.os }), h("td", { class: "muted wide-only", text: r.emulator }),
         h("td", {}, stateBadge(r)), h("td", { class: "mono", text: uptime(r.uptime) }),

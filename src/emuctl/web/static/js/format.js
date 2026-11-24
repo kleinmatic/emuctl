@@ -116,3 +116,19 @@ export function reachCommand(r, here) {
   if (r.service === "ssh") return r.port === 22 ? `ssh ${host}` : `ssh -p ${r.port} ${host}`;
   return `${host}:${r.port}`;
 }
+
+// Rows sorted by `get(row)`, "asc" or "desc"; rows with no value (null or
+// undefined) go last either way, and ties keep the guest-name order.
+export function sortRows(rows, get, dir) {
+  const sign = dir === "desc" ? -1 : 1;
+  return rows.map((r, i) => [r, i]).sort(([a, i], [b, j]) => {
+    const x = get(a);
+    const y = get(b);
+    const xn = x === null || x === undefined;
+    const yn = y === null || y === undefined;
+    if (xn || yn) return xn === yn ? i - j : (xn ? 1 : -1);
+    if (x < y) return -sign;
+    if (x > y) return sign;
+    return i - j;
+  }).map(([r]) => r);
+}

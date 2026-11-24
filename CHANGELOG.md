@@ -11,6 +11,9 @@
 - The Display tab and thumbnails can log in to a VNC server that uses
   TigerVNC's VeNCrypt X509Vnc (`display_auth = x509vnc`, with `display_ca`
   naming the certificate to trust), as 86Box guests' Xvnc servers do.
+- The host page's guest table sorts by any column: click a heading, click
+  again to reverse. Numbers start with the biggest; the choice is kept in
+  the browser.
 - A guest's summary shows how to reach it: `telnet`/`ssh` commands for its
   `guest_addr`, and for 86Box and QEMU guests on user-mode NAT, the ports
   forwarded from the host (read from `86box.cfg` or `hostfwd=`), each with a
