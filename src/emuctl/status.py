@@ -141,7 +141,8 @@ def format_info(settings, name, probe=probe_guest):
     if cfg.nics:
         line("nics", ", ".join(cfg.nics))
     if cfg.display:
-        auth = "password" if cfg.display_auth == "vnc" else "no password"
+        auth = {"vnc": "password", "x509vnc": "TLS and password"}.get(cfg.display_auth,
+                                                                       "no password")
         line("display", f"vnc://{cfg.display[0]}:{cfg.display[1]}  ({auth})")
     if cfg.notes:
         line("notes", cfg.notes)

@@ -8,6 +8,9 @@
   helper such as Xvnc before the emulator and stops it after, with
   `display_wait` naming the socket that must answer first. `emuctl console`
   and the web page's Console tab say there is no console.
+- The Display tab and thumbnails can log in to a VNC server that uses
+  TigerVNC's VeNCrypt X509Vnc (`display_auth = x509vnc`, with `display_ca`
+  naming the certificate to trust), as 86Box guests' Xvnc servers do.
 - `kind = 86box`, guessed from the program name: the Hardware tab and
   `emuctl info --hardware` read the machine's `86box.cfg`. A docs page for
   86Box and an example conf.

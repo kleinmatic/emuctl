@@ -117,7 +117,7 @@ def png(width, height, rows):
 async def snapshot(cfg):
     """PNG bytes of the guest's screen now. Raises RfbError."""
     password = (await asyncio.to_thread(read_password, cfg.display_password_file)
-                if cfg.display_auth == "vnc" else None)
+                if cfg.display_auth in ("vnc", "x509vnc") else None)
     host, port = cfg.display
     try:
         reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port),
@@ -125,7 +125,7 @@ async def snapshot(cfg):
     except (OSError, asyncio.TimeoutError):
         raise RfbError("nothing answers on the display")
     try:
-        await asyncio.wait_for(login(reader, writer, cfg.display_auth, password),
+        await asyncio.wait_for(login(reader, writer, cfg.display_auth, password, cfg.display_ca),
                                HANDSHAKE_TIMEOUT)
         w, h, fb = await asyncio.wait_for(grab(reader, writer), FRAME_TIMEOUT)
     except asyncio.TimeoutError:

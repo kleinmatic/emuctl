@@ -22,7 +22,7 @@ PATTERN_KEYS = ("ready", "halted", "command", "stop_command")
 STAGED = ("boot.", "stop.", "stuck.")
 HW_PREFIX = "hw."
 KINDS = ("simh", "es40", "qemu", "gxemul", "86box", "other")
-DISPLAY_AUTH = ("none", "vnc")
+DISPLAY_AUTH = ("none", "vnc", "x509vnc")
 # What a guest name may be. The web interface checks names from URLs against it.
 NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 KNOWN = set(REQUIRED) | {
@@ -30,7 +30,7 @@ KNOWN = set(REQUIRED) | {
     "boot_timeout", "console_timeout", "guest_addr", "guest_port",
     "stop_mode", "monitor", "stop_command", "stop_timeout", "stop_wake", "halt_grace",
     "exclusive_with", "kind", "config", "nics", "display", "display_auth",
-    "display_password_file", "notes", "locked",
+    "display_password_file", "display_ca", "notes", "locked",
     "console", "ready_after", "stop_signal", "display_command", "display_wait",
 }
 # Program names that are SIMH simulators, for guessing `kind`.
@@ -102,6 +102,7 @@ class GuestConfig:
     display: object = None                              # (host, port) or None
     display_auth: str = "none"
     display_password_file: object = None
+    display_ca: object = None                           # x509vnc: the certificate to trust
     notes: object = None                                # absolute path or None
     hw: dict = field(default_factory=dict)              # label -> text, in conf order
     locked: str = ""                                    # why it must not be started, or ""
@@ -277,8 +278,13 @@ def parse_config(text):
     display_auth = kv.get("display_auth", "vnc" if kv.get("display_password_file") else "none")
     if display_auth not in DISPLAY_AUTH:
         raise ConfigError(f"display_auth must be one of {DISPLAY_AUTH}, got {display_auth!r}")
-    if display_auth == "vnc" and not kv.get("display_password_file"):
-        raise ConfigError("display_auth = vnc needs display_password_file")
+    if display_auth in ("vnc", "x509vnc") and not kv.get("display_password_file"):
+        raise ConfigError(f"display_auth = {display_auth} needs display_password_file")
+    if display_auth == "x509vnc" and not kv.get("display_ca"):
+        raise ConfigError("display_auth = x509vnc needs display_ca: the VNC server's "
+                          "certificate, or the CA that signed it")
+    if kv.get("display_ca") and display_auth != "x509vnc":
+        raise ConfigError("display_ca is only for display_auth = x509vnc")
     if (display_auth != "none" or kv.get("display_password_file")) and not display:
         raise ConfigError("display_auth and display_password_file need display")
     if display_auth == "none" and kv.get("display_password_file"):
@@ -336,6 +342,7 @@ def parse_config(text):
         nics=nics, display=display, display_auth=display_auth,
         display_password_file=rel(kv["display_password_file"])
         if kv.get("display_password_file") else None,
+        display_ca=rel(kv["display_ca"]) if kv.get("display_ca") else None,
         notes=rel(kv["notes"]) if kv.get("notes") else None,
         hw=hw,
         locked=locked,

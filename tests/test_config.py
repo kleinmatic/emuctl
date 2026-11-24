@@ -107,3 +107,14 @@ def test_every_example_conf_parses():
         with open(path) as fh:
             c = parse_config(fh.read())
         assert c.unknown == [], path
+
+
+def test_x509vnc_needs_a_password_and_a_ca():
+    base = MINIMAL + "display = vnc://127.0.0.1:5901\n"
+    c = parse_config(base + "display_auth = x509vnc\ndisplay_password_file = p\n"
+                     "display_ca = vnc.crt\n")
+    assert c.display_auth == "x509vnc" and c.display_ca == "/srv/emu/pdp11/vnc.crt"
+    with pytest.raises(ConfigError, match="needs display_ca"):
+        parse_config(base + "display_auth = x509vnc\ndisplay_password_file = p\n")
+    with pytest.raises(ConfigError, match="only for display_auth = x509vnc"):
+        parse_config(base + "display_password_file = p\ndisplay_ca = vnc.crt\n")

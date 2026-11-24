@@ -54,7 +54,7 @@ async def serve_frame(w, h, bgrx, chatter=b"", name=b"test"):
 
 def cfg_for(port):
     return types.SimpleNamespace(name="g1", display=("127.0.0.1", port), display_auth="none",
-                                 display_password_file=None)
+                                 display_password_file=None, display_ca=None)
 
 
 async def test_a_frame_becomes_a_png():

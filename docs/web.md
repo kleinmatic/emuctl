@@ -165,6 +165,12 @@ sudo sh -c 'umask 027; cat > /etc/emuctl/display/<guest>.pass'   # type it, then
 sudo chgrp emuctl-web /etc/emuctl/display/<guest>.pass
 ```
 
+A VNC server that wants TLS first, such as TigerVNC's `Xvnc -SecurityTypes
+X509Vnc` (the usual way to put 86Box on a network), needs
+`display_auth = x509vnc` and `display_ca` naming its certificate. The daemon
+then checks the server's certificate against that file before it sends the
+password.
+
 Only operators can open a display, since the keyboard and mouse go straight
 to the guest. The daemon connects only while the guest is running, and asks
 the VNC server to let several viewers share the screen.

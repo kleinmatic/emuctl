@@ -338,3 +338,96 @@ async def test_browser_side_speaks_the_clients_version(site, version, offer, cho
     await ws.send_bytes(b"\x01")
     assert await take(ws, len(INIT)) == INIT
     await ws.close()
+
+
+# --- VeNCrypt X509Vnc against a real Xvnc ---------------------------------------------
+
+def _xvnc_tools():
+    import shutil
+    return all(shutil.which(t) for t in ("Xvnc", "vncpasswd", "openssl"))
+
+
+@pytest.fixture
+def xvnc(tmp_path):
+    """A real TigerVNC Xvnc offering only X509Vnc, with a throwaway certificate."""
+    import shutil
+    import subprocess
+    import time as _time
+
+    from conftest import free_ports
+    if not _xvnc_tools():
+        pytest.skip("needs Xvnc, vncpasswd and openssl")
+    crt, key, pw = tmp_path / "x.crt", tmp_path / "x.key", tmp_path / "passwd"
+    subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                    "-subj", "/CN=test-vnc", "-keyout", str(key), "-out", str(crt)],
+                   check=True, capture_output=True)
+    subprocess.run(["vncpasswd", "-f"], input=b"hunter22\n", stdout=open(pw, "wb"), check=True)
+    (tmp_path / "pass").write_text("hunter22\n")
+    port = free_ports(1)[0]
+    display = 70 + port % 20
+    proc = subprocess.Popen(["Xvnc", f":{display}", "-geometry", "320x200", "-depth", "24",
+                             "-rfbport", str(port), "-rfbauth", str(pw),
+                             "-SecurityTypes", "X509Vnc", "-X509Cert", str(crt),
+                             "-X509Key", str(key), "-localhost", "-AlwaysShared"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    import socket as _s
+    for _ in range(100):
+        try:
+            _s.create_connection(("127.0.0.1", port), 0.2).close()
+            break
+        except OSError:
+            _time.sleep(0.05)
+    yield port, str(crt), str(tmp_path / "pass"), tmp_path
+    proc.terminate()
+    proc.wait(5)
+    shutil.rmtree(tmp_path, ignore_errors=True)
+
+
+async def test_x509vnc_logs_in_to_a_real_xvnc(xvnc):
+    port, crt, pwfile, _ = xvnc
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        minor = await rfb.login(reader, writer, "x509vnc", "hunter22", crt)
+        assert minor == 8
+        writer.write(b"\x01")                               # ClientInit: the session works
+        await writer.drain()
+        w, h = struct.unpack(">HH", await reader.readexactly(4))
+        assert (w, h) == (320, 200)
+    finally:
+        writer.close()
+
+
+async def test_x509vnc_refuses_a_certificate_it_was_not_given(xvnc, tmp_path):
+    import subprocess
+    port, _, _, _ = xvnc
+    other = tmp_path / "other.crt"
+    subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                    "-subj", "/CN=someone-else", "-keyout", str(tmp_path / "o.key"),
+                    "-out", str(other)], check=True, capture_output=True)
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        with pytest.raises(rfb.RfbError, match="not the one display_ca trusts"):
+            await rfb.login(reader, writer, "x509vnc", "hunter22", str(other))
+    finally:
+        writer.close()
+
+
+async def test_x509vnc_wrong_password(xvnc):
+    port, crt, _, _ = xvnc
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        with pytest.raises(rfb.RfbError, match="refused the password"):
+            await rfb.login(reader, writer, "x509vnc", "wrong", crt)
+    finally:
+        writer.close()
+
+
+async def test_a_thumbnail_through_x509vnc(xvnc):
+    import types
+
+    from emuctl.web import thumb
+    port, crt, pwfile, _ = xvnc
+    cfg = types.SimpleNamespace(name="g", display=("127.0.0.1", port), display_auth="x509vnc",
+                                display_password_file=pwfile, display_ca=crt)
+    png = await thumb.snapshot(cfg)
+    assert png.startswith(b"\x89PNG")

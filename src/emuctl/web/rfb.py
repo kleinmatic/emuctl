@@ -9,10 +9,14 @@ unchanged both ways. The browser never sees the password. Proxmox works the
 same way.
 
 Speaks RFB 3.3, 3.7 and 3.8 to the guest's server, with security types None
-(1) and VNC authentication (2). Offers 3.8 and None to the browser.
+(1), VNC authentication (2), and VeNCrypt (19) subtype X509Vnc (261): TLS,
+with the server's certificate checked against `display_ca`, then VNC
+authentication inside it (TigerVNC's Xvnc with -SecurityTypes X509Vnc).
+Offers 3.8 and None to the browser.
 """
 import asyncio
 import logging
+import ssl
 import struct
 
 from aiohttp import WSMsgType, web
@@ -22,7 +26,8 @@ from .des import vnc_response
 log = logging.getLogger("emuctl.web")
 HANDSHAKE_TIMEOUT = 10
 MAX_REASON = 4096
-NONE, VNC_AUTH = 1, 2
+NONE, VNC_AUTH, VENCRYPT = 1, 2, 19
+X509VNC = 261                   # VeNCrypt subtype: X.509-verified TLS, then VNC auth
 
 
 class RfbError(Exception):
@@ -48,7 +53,52 @@ async def _read_reason(reader):
     return "".join(chr(b) if 32 <= b < 127 else "?" for b in raw[:100])
 
 
-async def login(reader, writer, auth, password=None):
+def tls_context(ca):
+    """TLS that trusts only `ca`: the VNC server's own certificate (Xvnc's are
+    usually self-signed) or the CA that signed it. The certificate is pinned
+    by that file, so the host name in it is not checked: the daemon reaches
+    the server as 127.0.0.1, which a certificate rarely names."""
+    if not ca:
+        raise RfbError("display_auth = x509vnc needs display_ca")
+    try:
+        ctx = ssl.create_default_context(cafile=ca)
+    except (OSError, ssl.SSLError) as exc:
+        raise RfbError(f"cannot read display_ca {ca}: {exc}")
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    return ctx
+
+
+async def vencrypt(reader, writer, ca):
+    """VeNCrypt, after security type 19 was chosen: agree version 0.2, pick
+    X509Vnc, and switch the connection to TLS in place."""
+    major, minor = await reader.readexactly(2)
+    if (major, minor) < (0, 2):
+        raise RfbError(f"the display speaks VeNCrypt {major}.{minor}; 0.2 is needed")
+    writer.write(b"\x00\x02")
+    await writer.drain()
+    if (await reader.readexactly(1))[0] != 0:
+        raise RfbError("the display refused VeNCrypt 0.2")
+    (n,) = await reader.readexactly(1)
+    subtypes = struct.unpack(f">{n}I", await reader.readexactly(4 * n))
+    if X509VNC not in subtypes:
+        raise RfbError(f"the display does not offer X509Vnc (it offers VeNCrypt subtypes "
+                       f"{list(subtypes)}); check display_auth")
+    writer.write(struct.pack(">I", X509VNC))
+    await writer.drain()
+    if (await reader.readexactly(1))[0] != 1:
+        raise RfbError("the display refused X509Vnc")
+    ctx = tls_context(ca)
+    try:
+        await writer.start_tls(ctx)
+    except ssl.SSLCertVerificationError as exc:
+        raise RfbError(f"the display's certificate is not the one display_ca trusts: "
+                       f"{exc.verify_message}")
+    except ssl.SSLError as exc:
+        raise RfbError(f"TLS with the display failed: {exc.reason or exc}")
+
+
+async def login(reader, writer, auth, password=None, ca=None):
     """Do the client side of the handshake with the guest's VNC server, up to
     and including the security result. Returns the server's minor version."""
     hello = await reader.readexactly(12)
@@ -63,7 +113,9 @@ async def login(reader, writer, auth, password=None):
     minor = 8 if minor >= 8 else 7 if minor >= 7 else 3
     writer.write(b"RFB 003.%03d\n" % minor)
     await writer.drain()
-    want = VNC_AUTH if auth == "vnc" else NONE
+    want = {"vnc": VNC_AUTH, "x509vnc": VENCRYPT}.get(auth, NONE)
+    if want == VENCRYPT and minor < 7:
+        raise RfbError("the display speaks RFB 3.3, which has no VeNCrypt")
 
     if minor == 3:
         (kind,) = struct.unpack(">I", await reader.readexactly(4))
@@ -75,7 +127,7 @@ async def login(reader, writer, auth, password=None):
             raise RfbError(f"the display refused the connection: {await _read_reason(reader)}")
         offered = await reader.readexactly(count)
         if want not in offered:
-            what = "VNC password" if want == VNC_AUTH else "no-password"
+            what = {VNC_AUTH: "VNC password", VENCRYPT: "VeNCrypt"}.get(want, "no-password")
             raise RfbError(f"the display does not offer {what} login (it offers types "
                            f"{list(offered)}); check display_auth")
         kind = want
@@ -84,13 +136,17 @@ async def login(reader, writer, auth, password=None):
     if kind != want:
         raise RfbError(f"the display wants security type {kind}, the conf says {auth}")
 
+    if kind == VENCRYPT:
+        await vencrypt(reader, writer, ca)
+        kind = VNC_AUTH                         # X509Vnc: VNC authentication, inside TLS
+
     if kind == VNC_AUTH:
         if password is None:
             raise RfbError("the display needs a password and none is configured")
         challenge = await reader.readexactly(16)
         writer.write(vnc_response(password, challenge))
         await writer.drain()
-    if kind == VNC_AUTH or minor == 8:
+    if kind == VNC_AUTH or minor == 8:          # always after VeNCrypt, too
         (result,) = struct.unpack(">I", await reader.readexactly(4))
         if result != 0:
             reason = await _read_reason(reader) if minor == 8 else ""
@@ -160,7 +216,7 @@ async def serve(request, cfg, user, tasks, sessions, token, running=True):
             # be listening on its display port, and would get the login.
             raise RfbError(f"{guest} is not running")
         password = (await asyncio.to_thread(read_password, cfg.display_password_file)
-                    if cfg.display_auth == "vnc" else None)
+                    if cfg.display_auth in ("vnc", "x509vnc") else None)
         host, port = cfg.display
         try:
             reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port),
@@ -169,8 +225,9 @@ async def serve(request, cfg, user, tasks, sessions, token, running=True):
             raise RfbError(f"nothing answers on {guest}'s display; is it running?")
         frames = FrameReader(ws)
         try:
-            await asyncio.wait_for(login(reader, writer, cfg.display_auth, password),
-                                   HANDSHAKE_TIMEOUT)
+            await asyncio.wait_for(
+                login(reader, writer, cfg.display_auth, password, cfg.display_ca),
+                HANDSHAKE_TIMEOUT)
             await asyncio.wait_for(greet_browser(ws, frames), HANDSHAKE_TIMEOUT)
             # ClientInit's shared flag, set to 1 whatever the browser asked, so
             # one page cannot throw everyone else off the guest's screen.
