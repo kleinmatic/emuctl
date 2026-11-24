@@ -200,6 +200,9 @@ def test_console_of_a_guest_with_none_is_refused(settings, tmp_path, monkeypatch
         fh.write(f"name = s2\nworkdir = {tmp_path}/s2\nconsole = none\ncommand = x\n"
                  f"disks = e.img\ndisplay_command = /bin/true\n"
                  f"display_wait = /tmp/.X11-unix/X9\n")
+    with open(settings.conf_path("s1"), "a") as fh:
+        fh.write("display_auth = x509vnc\ndisplay_password_file = p\ndisplay_ca = vnc.crt\n")
     errors, warnings = cli.check_guest(settings, "s1")
     assert any("ignores SIGTERM" in w for w in warnings)
+    assert any("display_ca" in e and "does not exist" in e for e in errors)
     assert any("also guest 's2'" in e for e in errors)

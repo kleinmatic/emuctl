@@ -71,6 +71,15 @@ def check_guest(settings, name):
                             f"cannot see it; check as the account that needs it")
         except OSError:
             errors.append(f"display_password_file {cfg.display_password_file} does not exist")
+    if cfg.display_ca:
+        try:
+            with open(cfg.display_ca, "rb"):
+                pass
+        except PermissionError:
+            warnings.append(f"display_ca {cfg.display_ca}: this user cannot read it; the web "
+                            f"daemon's account must (it is a certificate, not a secret)")
+        except OSError:
+            errors.append(f"display_ca {cfg.display_ca} does not exist")
     if cfg.stop_command and not _executable(cfg.stop_command[0]):
         errors.append(f"stop_command {cfg.stop_command[0]} is not an executable")
     if cfg.kind == "86box" and cfg.stop_signal == "TERM" and cfg.stop_mode == "signal":

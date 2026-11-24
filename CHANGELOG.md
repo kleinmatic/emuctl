@@ -11,6 +11,8 @@
 - The Display tab and thumbnails can log in to a VNC server that uses
   TigerVNC's VeNCrypt X509Vnc (`display_auth = x509vnc`, with `display_ca`
   naming the certificate to trust), as 86Box guests' Xvnc servers do.
+- `emuctl check` reports a `display_ca` that is missing or that the
+  checking account cannot read.
 - `kind = 86box`, guessed from the program name: the Hardware tab and
   `emuctl info --hardware` read the machine's `86box.cfg`. A docs page for
   86Box and an example conf.

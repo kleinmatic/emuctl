@@ -21,6 +21,12 @@ page's Display tab, see the guest. emuctl starts Xvnc as the guest's
 86Box: Xvnc creates the socket file before it accepts connections, and an
 86Box started in that gap dies with "could not connect to display".
 
+If Xvnc uses TLS (`-SecurityTypes X509Vnc`), the conf needs
+`display_auth = x509vnc` and `display_ca` naming Xvnc's certificate. Put a
+copy where the web daemon's account can read it, such as
+`/etc/emuctl/display/`: Xvnc's own copy usually sits in a directory only the
+guests' account can enter.
+
 Do not use Qt's own `vnc` platform plugin (`QT_QPA_PLATFORM=vnc`) instead.
 It offers no authentication at all, and with 6.0 it crashed under real VNC
 clients.
