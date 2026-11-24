@@ -27,6 +27,31 @@ SRC = os.path.join(os.path.dirname(__file__), "..", "..", "src")
 PASSWORD = "a long password"
 
 
+class Daemon(str):
+    """The daemon's base URL, and restart() to stop and start it on the same port."""
+
+    def start(self):
+        self.proc = subprocess.Popen([sys.executable, "-m", "emuctl.cli", "web", "serve"],
+                                     env=self.env, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL)
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            try:
+                socket.create_connection(("127.0.0.1", self.port), timeout=1).close()
+                return
+            except OSError:
+                time.sleep(0.2)
+
+    def stop(self):
+        self.proc.terminate()
+        self.proc.wait(10)
+
+    def restart(self, down_for=2):
+        self.stop()
+        time.sleep(down_for)
+        self.start()
+
+
 @pytest.fixture
 def daemon(settings, tmp_path):
     port = free_ports(1)[0]
@@ -35,20 +60,13 @@ def daemon(settings, tmp_path):
     wc = tmp_path / "web.conf"
     wc.write_text(f"listen = 127.0.0.1\nport = {port}\nstate_dir = {state}\n"
                   f"users_file = {state}/users\n")
-    env = dict(os.environ, EMUCTL_WEB_CONF=str(wc), EMUCTL_GUEST_DIR=settings.guest_dir,
-               EMUCTL_RUN_DIR=settings.run_dir, EMUCTL_SERVICE="systemd", PYTHONPATH=SRC)
-    proc = subprocess.Popen([sys.executable, "-m", "emuctl.cli", "web", "serve"], env=env,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    deadline = time.time() + 20
-    while time.time() < deadline:
-        try:
-            socket.create_connection(("127.0.0.1", port), timeout=1).close()
-            break
-        except OSError:
-            time.sleep(0.2)
-    yield f"https://127.0.0.1:{port}"
-    proc.terminate()
-    proc.wait(10)
+    d = Daemon(f"https://127.0.0.1:{port}")
+    d.port = port
+    d.env = dict(os.environ, EMUCTL_WEB_CONF=str(wc), EMUCTL_GUEST_DIR=settings.guest_dir,
+                 EMUCTL_RUN_DIR=settings.run_dir, EMUCTL_SERVICE="systemd", PYTHONPATH=SRC)
+    d.start()
+    yield d
+    d.stop()
 
 
 @pytest.fixture
@@ -90,6 +108,17 @@ def test_a_start_outside_the_page_shows_up_without_a_reload(page, daemon, guest)
     page.click("nav.tree a:has-text('vax')")
     page.wait_for_selector("h1:has-text('vax')")
     page.wait_for_selector("pre.text:has-text('login:')", timeout=15000)
+
+
+def test_the_page_keeps_up_after_the_daemon_restarts(page, daemon, guest):
+    g = guest(name="vax", extra="boot.1 = >>> | boot\n")
+    log_in(page, daemon)
+    page.wait_for_selector("table.data tbody tr:has-text('vax') .st-down")
+    daemon.restart()                         # the page's live stream drops meanwhile
+    page.wait_for_timeout(1500)
+    g.start()
+    g.wait_state("ready", timeout=30)
+    page.wait_for_selector("table.data tbody tr:has-text('vax') .st-ready", timeout=20000)
 
 
 def test_no_console_errors_and_logout(page, daemon, guest):

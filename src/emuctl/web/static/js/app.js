@@ -86,8 +86,13 @@ function show() {
 }
 
 let events = null;
+let retry = null;
 
+// The live stream of guest rows and tasks. It drops when the daemon restarts,
+// the network blinks or the laptop sleeps; the browser retries by itself, and
+// if it gives up the page opens a new stream. Only a real logout (401) ends it.
 function listen() {
+  if (events) events.close();
   const es = new EventSource("/api/events");
   events = es;
   es.addEventListener("guests", (ev) => {
@@ -96,9 +101,15 @@ function listen() {
   es.addEventListener("tasks", (ev) => store.setTasks(JSON.parse(ev.data)));
   es.addEventListener("task", (ev) => store.upsertTask(JSON.parse(ev.data)));
   es.onerror = async () => {
-    // The stream ends on logout, an expired session or a daemon restart.
-    // EventSource retries by itself; check whether we are still logged in.
-    try { await poll("/api/session"); } catch (e) { es.close(); }
+    if (events !== es) return;
+    try {
+      await poll("/api/session");
+    } catch (e) {
+      if (e.status === 401) { es.close(); return; }   // logged out: poll() went to /login
+    }
+    if (es.readyState === EventSource.CLOSED && !retry) {
+      retry = setTimeout(() => { retry = null; if (events === es) listen(); }, 3000);
+    }
   };
 }
 

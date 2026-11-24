@@ -11,6 +11,10 @@
 - The Display tab and thumbnails can log in to a VNC server that uses
   TigerVNC's VeNCrypt X509Vnc (`display_auth = x509vnc`, with `display_ca`
   naming the certificate to trust), as 86Box guests' Xvnc servers do.
+- The page keeps its live updates through a restart of the daemon or a
+  network blink; it used to stop updating until reloaded.
+- A guest with no `display` says so on the Display tab instead of trying
+  to connect.
 - The Console and Display tabs connect by themselves when the guest comes
   up, from the page or anywhere else, without pressing Reconnect.
 - The Display tab takes the shape of the guest's screen, up to the height

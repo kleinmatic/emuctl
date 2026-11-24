@@ -289,6 +289,11 @@ export function guestView(name, tab, store) {
 
   let screen = null;
   async function display() {
+    if (!detail) await refreshDetail();
+    if (detail && !detail.conf_error && !detail.display) {
+      return [h("div", { class: "card muted", text: `${name} has no graphical display: its conf ` +
+        "names none (display = vnc://host:port). Its console is on the Console tab." })];
+    }
     if (!screen) screen = displayView(name, store);
     return [screen.el];
   }
