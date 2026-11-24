@@ -18,6 +18,8 @@ jobs:
           python-version: ${{ matrix.python }}
       # aiohttp is for the web part only; on 3.10 its tests skip themselves.
       - run: python -m pip install pytest pytest-cov ruff aiohttp pytest-aiohttp
+      # A real Xvnc, for the VeNCrypt X509Vnc tests (they skip without one).
+      - run: sudo apt-get install -y --no-install-recommends tigervnc-standalone-server tigervnc-tools
       - run: ruff check src tests tools tools/devhost tools/webdemo
       - run: python -m pytest -q --cov=emuctl --cov-report=json --cov-report=term
       # The web daemon needs 3.11, so 3.10 cannot cover it.

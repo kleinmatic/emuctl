@@ -51,7 +51,10 @@ pytest, pytest-cov and ruff are the only tools needed for the core. The web
 tests also need Python 3.11, `aiohttp` and `pytest-aiohttp`; without them
 they skip themselves. Install everything with
 `python3 -m pip install pytest pytest-cov ruff aiohttp pytest-aiohttp`, or
-make a virtualenv: `uv venv && uv pip install -e '.[test]' ruff`.
+make a virtualenv: `uv venv && uv pip install -e '.[test]' ruff`. The
+VeNCrypt tests run a real TigerVNC `Xvnc` (with `vncpasswd` and `openssl`)
+and skip without one; CI installs `tigervnc-standalone-server`, so coverage
+there counts them.
 
 ```sh
 python3 -m pytest -q                              # all tests, no root, no emulator
