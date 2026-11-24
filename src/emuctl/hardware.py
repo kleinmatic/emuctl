@@ -8,7 +8,8 @@ emulator config is the user's file, written for the emulator, not for us.
     {"machine": str|None, "cpu": str|None, "memory": str|None,
      "disks": [{"unit", "model", "file", "kind", "readonly"}],
      "nics":  [{"unit", "model", "mac", "host_if"}],
-     "other": [str], "sources": [path], "problems": [str]}
+     "other": [str], "sources": [path], "problems": [str],
+     "forwards": [{"host_port", "guest_port"}]}   # TCP ports the emulator forwards
 
 `hw.<label>` lines in the guest conf take precedence over anything parsed.
 """
@@ -37,7 +38,7 @@ GXEMUL_MODELS = {"3max": "DECstation 5000/200", "3min": "DECstation 5000/1xx",
 
 def empty():
     return {"machine": None, "cpu": None, "memory": None, "disks": [], "nics": [],
-            "other": [], "sources": [], "problems": []}
+            "other": [], "sources": [], "problems": [], "forwards": []}
 
 
 def mb(n):
@@ -202,6 +203,12 @@ def _kv_opts(text):
     return first, out
 
 
+def _forwards(hw, val):
+    """QEMU user networking's hostfwd=tcp:[addr]:HOSTPORT-[addr]:GUESTPORT."""
+    for m in re.finditer(r"hostfwd=tcp:[^:,]{0,64}:([0-9]{1,5})-[^:,]{0,64}:([0-9]{1,5})", val):
+        hw["forwards"].append({"host_port": int(m.group(1)), "guest_port": int(m.group(2))})
+
+
 def parse_qemu(argv):
     hw = empty()
     prog = os.path.basename(argv[0]) if argv else ""
@@ -239,6 +246,7 @@ def parse_qemu(argv):
                                 "kind": "cdrom" if cd else "disk",
                                 "readonly": cd or kv.get("readonly") in ("on", "true")})
         elif opt in ("net", "nic"):
+            _forwards(hw, val)
             first, kv = _kv_opts(val)
             if opt == "net" and first == "nic":
                 nics.append({"unit": f"nic{len(nics)}", "model": kv.get("model"),
@@ -254,6 +262,7 @@ def parse_qemu(argv):
                              "mac": kv.get("mac"),
                              "host_if": kv.get("ifname") if first == "tap" else None})
         elif opt == "netdev":
+            _forwards(hw, val)
             first, kv = _kv_opts(val)
             if kv.get("id"):
                 netdevs[kv["id"]] = kv.get("ifname") if first == "tap" else None
@@ -402,6 +411,15 @@ def parse_86box(text):
                            "host_if": host if kind in ("pcap", "tap", "vde") else None})
         if kind == "slirp":
             hw["other"].append(f"net {int(n)}: SLiRP, user-mode NAT on the host")
+    # SLiRP port forwards: [SLiRP Port Forwarding #1] 0_external = 2324, 0_internal = 23
+    for sec, kv in ini.items():
+        if not sec.startswith("SLiRP Port Forwarding"):
+            continue
+        for key in sorted(kv):
+            mt = re.fullmatch(r"([0-9]{1,2})_external", key)
+            inside = kv.get(f"{mt.group(1)}_internal", "") if mt else ""
+            if mt and re.fullmatch(r"[0-9]{1,5}", kv[key]) and re.fullmatch(r"[0-9]{1,5}", inside):
+                hw["forwards"].append({"host_port": int(kv[key]), "guest_port": int(inside)})
     video = ini.get("Video", {}).get("gfxcard")
     if video:
         hw["other"].append(f"video: {video}")
@@ -482,7 +500,7 @@ def describe(cfg, read=None):
                         else PARSERS[cfg.kind](text))
                 for key in ("machine", "cpu", "memory"):
                     hw[key] = hw[key] or part[key]
-                for key in ("disks", "nics", "other", "problems"):
+                for key in ("disks", "nics", "other", "problems", "forwards"):
                     hw[key].extend(part[key])
                 hw["sources"].append(path)
     except Exception as exc:                # a parser bug must not break `info`
@@ -508,6 +526,8 @@ def format_hardware(hw):
         line("nic", f"{n['unit']}: " + ", ".join(b for b in bits if b))
     for o in hw["other"]:
         line("other", o)
+    for f in hw.get("forwards", []):
+        line("forward", f"host port {f['host_port']} -> guest port {f['guest_port']}")
     line("read from", ", ".join(hw["sources"]) or "nothing (set `config` in the conf)")
     for p in hw["problems"]:
         line("problem", p)

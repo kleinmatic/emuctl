@@ -107,3 +107,12 @@ export function segments(values, max, w = 300, h = 80, t = null, step = null) {
   if (cur.length) out.push(cur);
   return out;
 }
+
+// "telnet 192.0.2.10", "ssh -p 2223 host": one line per way in. A forward's
+// host is the name this page was reached by.
+export function reachCommand(r, here) {
+  const host = r.host || here;
+  if (r.service === "telnet") return r.port === 23 ? `telnet ${host}` : `telnet ${host} ${r.port}`;
+  if (r.service === "ssh") return r.port === 22 ? `ssh ${host}` : `ssh -p ${r.port} ${host}`;
+  return `${host}:${r.port}`;
+}

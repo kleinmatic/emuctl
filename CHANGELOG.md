@@ -11,6 +11,10 @@
 - The Display tab and thumbnails can log in to a VNC server that uses
   TigerVNC's VeNCrypt X509Vnc (`display_auth = x509vnc`, with `display_ca`
   naming the certificate to trust), as 86Box guests' Xvnc servers do.
+- A guest's summary shows how to reach it: `telnet`/`ssh` commands for its
+  `guest_addr`, and for 86Box and QEMU guests on user-mode NAT, the ports
+  forwarded from the host (read from `86box.cfg` or `hostfwd=`), each with a
+  Copy button. `emuctl info --hardware` lists the forwards too.
 - The page keeps its live updates through a restart of the daemon or a
   network blink; it used to stop updating until reloaded.
 - A guest with no `display` says so on the Display tab instead of trying

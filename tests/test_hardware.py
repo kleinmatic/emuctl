@@ -122,6 +122,15 @@ def test_86box():
     assert [(n["model"], n["host_if"]) for n in hw["nics"]] == [("novell_ne2k", None),
                                                                 ("pcnetfast", "tap7")]
     assert "net 1: SLiRP, user-mode NAT on the host" in hw["other"]
+    assert hw["forwards"] == [{"host_port": 2223, "guest_port": 22},
+                              {"host_port": 2324, "guest_port": 23}]
+
+
+def test_qemu_user_network_forwards():
+    hw = hardware.parse_qemu(["qemu-system-x86_64", "-netdev",
+                              "user,id=n0,hostfwd=tcp::2222-:22,hostfwd=tcp:127.0.0.1:2323-:23"])
+    assert hw["forwards"] == [{"host_port": 2222, "guest_port": 22},
+                              {"host_port": 2323, "guest_port": 23}]
 
 
 def test_86box_hostile_numbers_do_not_raise():

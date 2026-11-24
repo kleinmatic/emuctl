@@ -137,6 +137,11 @@ One row plus what the page needs from the conf:
  "display": null, "guest_addr": "192.0.2.10", "nics": [], "notes": false,
  "can_start": true, "start_refused": "", "boot_timeout": 300}
 ```
+`reach` lists ways into the guest: its `guest_addr` and `guest_port`, and
+for 86Box and QEMU guests on user-mode NAT, each TCP port forwarded from the
+host (`host` is null: use the name you reached the daemon by). `service` is
+`telnet`, `ssh` or null.
+
 `can_start` and `start_refused` are the start guard's answer, as
 `emuctl start` would give it. A guest whose conf does not parse has
 `state: "error"` and `conf_error`.

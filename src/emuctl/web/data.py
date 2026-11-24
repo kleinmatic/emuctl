@@ -118,6 +118,28 @@ def stop_route(cfg):
     return "stops the emulator only: a power cut for the guest OS"
 
 
+SERVICES = {22: "ssh", 23: "telnet"}
+
+
+def reach(cfg):
+    """How to reach the guest from outside: its own address, and ports the
+    emulator forwards from the host (86Box's and QEMU's user-mode NAT).
+    A forward's host is None: the page fills in the name it reached us by."""
+    out = []
+    if cfg.guest_addr:
+        out.append({"host": cfg.guest_addr, "port": cfg.guest_port,
+                    "service": SERVICES.get(cfg.guest_port)})
+    if cfg.kind in ("86box", "qemu"):
+        try:
+            hw = hardware.describe(cfg, read=careful_read)
+        except Exception:                       # never let a config break the page
+            hw = {}
+        for f in hw.get("forwards", []):
+            out.append({"host": None, "port": f["host_port"],
+                        "service": SERVICES.get(f["guest_port"]), "guest_port": f["guest_port"]})
+    return out
+
+
 def guest_detail(settings, name, row):
     """One guest's row plus what the page needs to know about its conf."""
     out = dict(row)
@@ -152,6 +174,7 @@ def guest_detail(settings, name, row):
         "display": ({"host": cfg.display[0], "port": cfg.display[1], "auth": cfg.display_auth}
                     if cfg.display else None),
         "guest_addr": cfg.guest_addr,
+        "reach": reach(cfg),
         "nics": cfg.nics,
         "notes": bool(cfg.notes),
         "stop": stops,
@@ -165,11 +188,13 @@ def guest_detail(settings, name, row):
     return out
 
 
+def careful_read(path):
+    if not safe_path(path):
+        raise OSError(0, "not shown: a protected file")
+    return hardware.read_config(path)
+
+
 def guest_hardware(cfg):
-    def careful_read(path):
-        if not safe_path(path):
-            raise OSError(0, "not shown: a protected file")
-        return hardware.read_config(path)
     hw = hardware.describe(cfg, read=careful_read)
     raw = []
     for path in hw.get("sources", []):

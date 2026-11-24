@@ -3,7 +3,7 @@
 import { get, guestPath, image, poll } from "../api.js";
 import { chart } from "../chart.js";
 import { clear, h, kv } from "../dom.js";
-import { DASH, bytes, isUp, last, longUptime, pct, rate } from "../format.js";
+import { DASH, bytes, isUp, last, longUptime, pct, rate, reachCommand } from "../format.js";
 import { actionButtons } from "./actions.js";
 import { consoleView } from "./console.js";
 import { displayView } from "./display.js";
@@ -28,6 +28,22 @@ function macLine(n) {
   if (!n.mac) return "not in the config";
   const seen = n.mac_seen === true ? "seen on the bridge" : n.mac_seen === false ? "not seen" : "not checked";
   return `${n.mac} · ${seen}`;
+}
+
+function reachList(list) {
+  if (!list || !list.length) return null;
+  return h("div", { class: "reach" }, list.map((r) => {
+    const cmd = reachCommand(r, location.hostname);
+    const note = r.host ? "" : ` (forwarded to the guest's port ${r.guest_port})`;
+    return h("div", {},
+      h("code", { text: cmd }),
+      navigator.clipboard ? h("button", { class: "btn mini", type: "button", text: "Copy",
+        title: "Copy the command", onclick: (e) => {
+          navigator.clipboard.writeText(cmd).then(() => { e.target.textContent = "Copied"; },
+            () => {});
+        } }) : null,
+      note ? h("span", { class: "muted", text: note }) : null);
+  }));
 }
 
 function hwDisks(disks) {
@@ -114,6 +130,7 @@ export function guestView(name, tab, store) {
     const status = h("section", { class: "card" }, h("h2", { text: "Status" }), kv([
       ["State", `${d.state}${d.detail ? ` · ${d.detail}` : ""}`],
       ["Locked", d.locked ? `${d.locked} (starts are refused)` : null],
+      ["Reach", reachList(d.reach)],
       ["Uptime", up ? longUptime(d.uptime) : DASH],
       ["Stop", d.stop_route],
       ["Exclusive with", d.exclusive_with.length ? d.exclusive_with.join(", ") : null],

@@ -91,3 +91,10 @@ test("a phosphor turns every colour into its own", () => {
   assert.equal(t.black, ph.PHOSPHORS.green.bg);
   assert.equal(ph.xtermTheme("modern").red, undefined);        // modern keeps the colours
 });
+
+test("a way into a guest, as a command", () => {
+  assert.equal(f.reachCommand({ host: "192.0.2.10", port: 23, service: "telnet" }, "h"), "telnet 192.0.2.10");
+  assert.equal(f.reachCommand({ host: null, port: 2324, service: "telnet" }, "starry"), "telnet starry 2324");
+  assert.equal(f.reachCommand({ host: null, port: 2223, service: "ssh" }, "starry"), "ssh -p 2223 starry");
+  assert.equal(f.reachCommand({ host: "192.0.2.10", port: 80, service: null }, "h"), "192.0.2.10:80");
+});

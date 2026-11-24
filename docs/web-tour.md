@@ -66,6 +66,11 @@ hardware read from the emulator's config, and the last lines of its console.
 last day (a point a minute). [monitoring.md](monitoring.md) says what each
 number means.
 
+**Reach** gives a command for each way into the guest, with a Copy button:
+`telnet` or `ssh` to its own address (`guest_addr` in the conf), and for an
+86Box or QEMU guest behind user-mode NAT, the ports forwarded to it from this
+host.
+
 Anything `emuctl check` finds wrong with the guest's conf is listed under
 **Checks**, as the web daemon's account sees it. A guest with a display has
 a **Screen** thumbnail, at most a minute old; click it for the Display tab.

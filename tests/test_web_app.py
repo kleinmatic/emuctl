@@ -289,6 +289,7 @@ async def test_guest_list_and_detail(client):
     g = await (await client.get("/api/guests/g1", headers=h)).json()
     assert g["can_start"] is True and g["start_refused"] == ""
     assert g["console"]["port"] == 2300 and g["display"] is None
+    assert g["reach"] == []                        # no guest_addr, not NAT
     assert "power cut" in g["stop_route"]
 
 
@@ -326,6 +327,21 @@ async def test_energy(client):
     h = await session(client)
     r = await (await client.get("/api/energy", headers=h)).json()
     assert r["cpus"] >= 1 and [g["name"] for g in r["guests"]] == ["g1", "g2"]
+
+
+async def test_reach_lists_the_address_and_forwards(client, settings, tmp_path):
+    with open(settings.conf_path("g1"), "a") as fh:
+        fh.write("guest_addr = 192.0.2.10\nkind = qemu\n")
+    with open(settings.conf_path("g1")) as fh:
+        text = fh.read().replace("command = ", "command = qemu-system-ppc -net "
+                                 "user,hostfwd=tcp::2223-:22 ", 1)
+    with open(settings.conf_path("g1"), "w") as fh:
+        fh.write(text)
+    h = await session(client)
+    g = await (await client.get("/api/guests/g1", headers=h)).json()
+    assert g["reach"] == [
+        {"host": "192.0.2.10", "port": 23, "service": "telnet"},
+        {"host": None, "port": 2223, "service": "ssh", "guest_port": 22}]
 
 
 async def test_check(client, settings):

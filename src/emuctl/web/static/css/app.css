@@ -340,6 +340,13 @@ body.popout .vt-box[data-look="modern"] { min-height: 0; }
 .screen-note { background: var(--panel); color: var(--text); border: 1px solid var(--line);
   border-radius: 4px; padding: 10px 16px; font-weight: 500; max-width: 80%; text-align: center; }
 
+/* how to reach a guest */
+.reach { display: flex; flex-direction: column; gap: 4px; }
+.reach > div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.reach code { font-family: var(--mono); font-size: 12px; background: var(--head);
+  padding: 1px 6px; border-radius: 3px; }
+.btn.mini { min-height: 0; padding: 1px 8px; font-size: 11px; }
+
 /* display */
 img.thumb { display: block; width: 100%; max-width: 480px; height: auto; border-radius: 3px;
   background: #000; image-rendering: auto; }
