@@ -470,7 +470,8 @@ class Supervisor:
         cfg = self.cfg
         env = dict(os.environ, **cfg.env)
         env.update(EMUCTL_GUEST=cfg.name, EMUCTL_NODE=cfg.node, EMUCTL_WORKDIR=cfg.workdir,
-                   EMUCTL_BROKER_HOST=cfg.bind, EMUCTL_BROKER_PORT=str(cfg.broker),
+                   EMUCTL_BROKER_HOST=cfg.bind if cfg.has_console else "",
+                   EMUCTL_BROKER_PORT=str(cfg.broker) if cfg.has_console else "",
                    EMUCTL_GUEST_ADDR=cfg.guest_addr or "")
         log(f"running stop_command: {' '.join(cfg.stop_command)}")
         try:
@@ -590,11 +591,19 @@ class Supervisor:
         cfg = self.cfg
         if not cfg.display_command:
             return None
+        if cfg.display_wait and path_answers(cfg.display_wait):
+            # Someone else's server (another guest's, or one left over): the
+            # emulator would draw on it, and die when it goes.
+            return f"{cfg.display_wait} already answers before the display helper started; " \
+                   f"is another guest or a leftover server using that display?"
         log(f"starting the display helper: {' '.join(cfg.display_command)}")
         try:
+            # Its own session, so a Ctrl-C at a foreground supervisor does not
+            # take the display away from the emulator.
             self.helper = subprocess.Popen(cfg.display_command, env=dict(os.environ, **cfg.env),
                                            cwd=cfg.workdir, stdout=out,
-                                           stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+                                           stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                           start_new_session=True)
         except OSError as exc:
             return f"cannot start the display helper {cfg.display_command[0]}: {exc}"
         if not cfg.display_wait:
@@ -605,6 +614,10 @@ class Supervisor:
                 return f"the display helper exited {self.helper.returncode} before " \
                        f"{cfg.display_wait} answered"
             if path_answers(cfg.display_wait):
+                time.sleep(0.2)
+                if self.helper.poll() is not None:
+                    return f"the display helper exited {self.helper.returncode} just after " \
+                           f"{cfg.display_wait} answered"
                 return None
             time.sleep(0.1)
         if self.stop_requests:
@@ -680,21 +693,17 @@ class Supervisor:
                         started_at=self.started_at)
             return 0 if stopped else 1
         try:
-            self.proc = subprocess.Popen(cfg.command, env=dict(os.environ, **cfg.env),
-                                         cwd=cfg.workdir, stdout=out, stderr=subprocess.STDOUT,
-                                         stdin=subprocess.DEVNULL)
-        except OSError as exc:
-            log(f"cannot start {cfg.command[0]}: {exc}")
-            self.stop_helper()
+            try:
+                self.proc = subprocess.Popen(cfg.command, env=dict(os.environ, **cfg.env),
+                                             cwd=cfg.workdir, stdout=out,
+                                             stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+            except OSError as exc:
+                log(f"cannot start {cfg.command[0]}: {exc}")
+                return 1
+            self.set_state("starting")
             if ls:
-                ls.close()
-            guard.release(locks)
-            return 1
-        self.set_state("starting")
-        if ls:
-            threading.Thread(target=self.listener, args=(ls,), daemon=True).start()
+                threading.Thread(target=self.listener, args=(ls,), daemon=True).start()
 
-        try:
             if not cfg.has_console:
                 self.run_without_console()
                 self.proc.wait()
@@ -743,7 +752,10 @@ class Supervisor:
             return 0
         finally:
             self.done.set()
-            self.stop_helper()              # after the emulator, which draws on it
+            # After the emulator, which draws on it; never from under one still
+            # running (a supervisor fault must not become a power cut).
+            if self.proc is None or self.proc.poll() is not None:
+                self.stop_helper()
             if ls:
                 ls.close()
             guard.release(locks)

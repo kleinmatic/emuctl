@@ -366,33 +366,33 @@ def parse_86box(text):
     if m.get("cpu_family"):
         cpu = B86_CPUS.get(m["cpu_family"], m["cpu_family"])
         speed = m.get("cpu_speed", "")
-        if speed.isdigit() and 0 < int(speed) < 10 ** 11:
+        if re.fullmatch(r"[0-9]{1,12}", speed) and 0 < int(speed) < 10 ** 11:
             cpu += f", {round(int(speed) / 1e6)} MHz"
         hw["cpu"] = cpu
-    if m.get("mem_size", "").isdigit():
+    if re.fullmatch(r"[0-9]{1,10}", m.get("mem_size", "")):
         hw["memory"] = mb(int(m["mem_size"]) // 1024)
     disks = ini.get("Hard disks", {})
     for key in sorted(disks):
-        mt = re.fullmatch(r"hdd_(\d+)_fn", key)
+        mt = re.fullmatch(r"hdd_([0-9]{1,3})_fn", key)
         if not mt:
             continue
         n = mt.group(1)
         params = [x.strip() for x in disks.get(f"hdd_{n}_parameters", "").split(",")]
         model = None
-        if len(params) >= 5 and all(x.isdigit() for x in params[:3]):
+        if len(params) >= 5 and all(re.fullmatch(r"[0-9]{1,6}", x) for x in params[:3]):
             size = round(int(params[0]) * int(params[1]) * int(params[2]) * 512 / (1024 * 1024))
             model = f"{params[4].upper()} disk, {mb(size)}"
         hw["disks"].append({"unit": f"hdd {int(n)}", "model": model, "file": disks[key],
                             "kind": "disk", "readonly": False})
     drives = ini.get("Floppy and CD-ROM drives", {})
     for key in sorted(drives):
-        mt = re.fullmatch(r"cdrom_(\d+)_image_path", key)
+        mt = re.fullmatch(r"cdrom_([0-9]{1,3})_image_path", key)
         if mt and drives[key]:
             hw["disks"].append({"unit": f"cdrom {int(mt.group(1))}", "model": None,
                                 "file": drives[key], "kind": "cdrom", "readonly": True})
     net = ini.get("Network", {})
     for key in sorted(net):
-        mt = re.fullmatch(r"net_(\d+)_card", key)
+        mt = re.fullmatch(r"net_([0-9]{1,3})_card", key)
         if not mt or net[key] in ("", "none"):
             continue
         n = mt.group(1)

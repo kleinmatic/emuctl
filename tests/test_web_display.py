@@ -431,3 +431,33 @@ async def test_a_thumbnail_through_x509vnc(xvnc):
                                 display_password_file=pwfile, display_ca=crt)
     png = await thumb.snapshot(cfg)
     assert png.startswith(b"\x89PNG")
+
+
+@pytest.mark.parametrize("script,match", [
+    (b"\x00\x02\x00\x01\x00\x00\x01\x02", "does not offer X509Vnc"),   # TLSVnc (258) only
+    (b"\x00\x01", "0.2 is needed"),                                     # VeNCrypt 0.1
+    (b"\x00\x02\x01", "refused VeNCrypt 0.2"),
+])
+async def test_vencrypt_negotiation_failures(script, match):
+    async def server(r, w):
+        w.write(b"RFB 003.008\n")
+        await r.readexactly(12)
+        w.write(bytes([1, 19]))                    # one security type: VeNCrypt
+        await r.readexactly(1)
+        w.write(script[:2])
+        await w.drain()
+        if len(script) > 2:
+            await r.readexactly(2)                 # the client's 0.2
+            w.write(script[2:])
+            await w.drain()
+        await r.read()
+        w.close()
+    srv = await asyncio.start_server(server, "127.0.0.1", 0)
+    port = srv.sockets[0].getsockname()[1]
+    async with srv:
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        try:
+            with pytest.raises(rfb.RfbError, match=match):
+                await rfb.login(reader, writer, "x509vnc", "pw", "/nonexistent.crt")
+        finally:
+            writer.close()

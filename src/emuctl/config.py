@@ -18,7 +18,7 @@ CONSOLES = ("serial", "none")
 STOP_SIGNALS = ("TERM", "HUP", "INT", "QUIT")
 VALID_STOP_MODES = ("signal", "freeze", "monitor")
 # Keys whose value may contain '#', so an inline comment cannot be stripped.
-PATTERN_KEYS = ("ready", "halted", "command", "stop_command")
+PATTERN_KEYS = ("ready", "halted", "command", "stop_command", "display_command")
 STAGED = ("boot.", "stop.", "stuck.")
 HW_PREFIX = "hw."
 KINDS = ("simh", "es40", "qemu", "gxemul", "86box", "other")

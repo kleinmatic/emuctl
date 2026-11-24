@@ -124,6 +124,15 @@ def test_86box():
     assert "net 1: SLiRP, user-mode NAT on the host" in hw["other"]
 
 
+def test_86box_hostile_numbers_do_not_raise():
+    huge = "9" * 5000
+    text = (f"[Machine]\ncpu_family = x\ncpu_speed = \u00b2\nmem_size = {huge}\n"
+            f"[Hard disks]\nhdd_{huge}_fn = a\nhdd_01_fn = b\n"
+            f"hdd_01_parameters = {huge},{huge},{huge},0,ide\n[Network]\nnet_{huge}_card = ne2k\n")
+    hw = hardware.parse_86box(text)
+    assert hw["memory"] is None and hw["cpu"] == "x" and len(hw["disks"]) == 1
+
+
 def test_86box_config_is_found_from_minus_p(tmp_path):
     from emuctl.config import parse_config
     cfg = parse_config(f"name = d\nworkdir = {tmp_path}\nconsole = none\ndisks = hdd.img\n"

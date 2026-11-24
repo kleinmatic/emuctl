@@ -73,6 +73,9 @@ def check_guest(settings, name):
             errors.append(f"display_password_file {cfg.display_password_file} does not exist")
     if cfg.stop_command and not _executable(cfg.stop_command[0]):
         errors.append(f"stop_command {cfg.stop_command[0]} is not an executable")
+    if cfg.kind == "86box" and cfg.stop_signal == "TERM" and cfg.stop_mode == "signal":
+        warnings.append("86Box ignores SIGTERM; set stop_signal = HUP, or every stop waits "
+                        "out the grace period and ends in SIGKILL")
     if cfg.display_command and not _executable(cfg.display_command[0]):
         errors.append(f"display_command {cfg.display_command[0]} is not an executable")
     if cfg.has_console and cfg.bind not in ("127.0.0.1", "::1", "localhost"):
@@ -101,6 +104,9 @@ def check_guest(settings, name):
         wild = ("0.0.0.0", "::")
         if clash and (_addr(o.bind) == _addr(cfg.bind) or o.bind in wild or cfg.bind in wild):
             errors.append(f"port(s) {', '.join(map(str, clash))} also used by guest '{other}'")
+        if cfg.display_wait and cfg.display_wait == o.display_wait:
+            errors.append(f"display_wait {cfg.display_wait} is also guest '{other}''s: the two "
+                          f"would share one display")
         shared = sorted(set(cfg.disks) & set(o.disks))
         if shared and other not in cfg.exclusive_with:
             warnings.append(f"shares {', '.join(shared)} with '{other}' but is not "

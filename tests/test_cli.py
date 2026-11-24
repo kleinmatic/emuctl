@@ -193,3 +193,13 @@ def test_console_of_a_guest_with_none_is_refused(settings, tmp_path, monkeypatch
     assert "no serial console" in capsys.readouterr().err
     errors, warnings = cli.check_guest(settings, "s1")
     assert any("no stop_command" in w for w in warnings)
+    with open(settings.conf_path("s1"), "a") as fh:
+        fh.write("kind = 86box\ndisplay_command = /bin/true\ndisplay_wait = /tmp/.X11-unix/X9\n")
+    (tmp_path / "s2").mkdir()
+    with open(settings.conf_path("s2"), "w") as fh:
+        fh.write(f"name = s2\nworkdir = {tmp_path}/s2\nconsole = none\ncommand = x\n"
+                 f"disks = e.img\ndisplay_command = /bin/true\n"
+                 f"display_wait = /tmp/.X11-unix/X9\n")
+    errors, warnings = cli.check_guest(settings, "s1")
+    assert any("ignores SIGTERM" in w for w in warnings)
+    assert any("also guest 's2'" in e for e in errors)

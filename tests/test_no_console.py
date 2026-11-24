@@ -29,9 +29,9 @@ workdir = {workdir}
 console = none
 command = {sys.executable} {SCREEN} {screen_args}
 disks = disk.img
-ready_after = 1
 stop_timeout = 5
 {extra}
+{"" if "ready_after" in extra else "ready_after = 1"}
 """
         with open(settings.conf_path("s1"), "w") as fh:
             fh.write(text)
@@ -149,3 +149,44 @@ def test_console_none_parses_without_the_console_keys():
                      "disks = d.img\nstop_signal = sighup\n")
     assert not c.has_console and c.serials == [] and c.broker is None
     assert c.stop_signal == "HUP" and c.kind == "86box" and c.ready_after == 10
+
+
+def test_a_display_someone_else_already_holds_is_refused(screen, tmp_path):
+    import socket as _s
+    sock, marker = str(tmp_path / "X1"), str(tmp_path / "helper-stopped")
+    other = _s.socket(_s.AF_UNIX, _s.SOCK_STREAM)    # another guest's server, say
+    other.bind(sock)
+    other.listen(1)
+    try:
+        g = screen(extra=f"display_command = {sys.executable} {DISPLAY} {sock} {marker}\n"
+                         f"display_wait = {sock}")
+        g.thread.join(10)
+        assert g.rc == 1 and g.sup.proc is None and g.sup.helper is None
+        assert "already answers" in read_state(g.settings.run_dir, "s1")["error"]
+    finally:
+        other.close()
+
+
+def test_a_stop_while_waiting_for_the_display_is_down(screen, tmp_path, monkeypatch):
+    monkeypatch.setattr(supervisor, "DISPLAY_WAIT", 5)
+    sock, marker = str(tmp_path / "X1"), str(tmp_path / "helper-stopped")
+    g = screen(extra=f"display_command = {sys.executable} {DISPLAY} {sock} {marker} --never\n"
+                     f"display_wait = {sock}")
+    time.sleep(0.5)
+    g.sup.request_stop()
+    g.thread.join(10)
+    assert g.rc == 0 and g.state() == "down" and g.sup.proc is None
+
+
+def test_a_stop_while_booting_and_a_stop_command(screen, tmp_path):
+    out = tmp_path / "ran"
+    g = screen(extra=f"ready_after = 30\nstop_command = /bin/sh -c 'echo \"[$EMUCTL_BROKER_PORT]\""
+                     f" > {out}'")
+    g.wait_state("booting")
+    g.stop()
+    assert g.state() == "down"
+    assert not out.exists()                          # not ready: no in-guest shutdown tried
+    g2 = screen(extra=f"stop_command = /bin/sh -c 'echo \"[$EMUCTL_BROKER_PORT]\" > {out}'")
+    g2.wait_state("ready")
+    g2.stop()
+    assert out.read_text() == "[]\n"                 # no broker: empty, not "None"
