@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 (2026-11-23)
 
 - Guests with no serial console, such as 86Box: `console = none`. Such a
   guest is `ready` after `ready_after` seconds; `stop_signal` chooses the
